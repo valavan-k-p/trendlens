@@ -115,11 +115,23 @@ describe('resampling', () => {
     expect(r[0]).toEqual({ time: 0, open: 0, high: 4, low: -1, close: 3.5, volume: 40 });
   });
 
-  it('aligns buckets to the exchange day', () => {
-    // IST is UTC+5:30, so a 4h bucket boundary falls at 22:30 UTC.
+  it('aligns buckets to the exchange day and stamps bars with the bucket start', () => {
+    // IST is UTC+5:30, so 4h buckets start at 22:30, 02:30, 06:30 UTC.
     const r = resample(hourly, '4h', 19800);
-    expect(r[0].time).toBe(0);
-    expect(r.length).toBe(3);
+    expect(r.map((c) => c.time)).toEqual([-5400, 9000, 23400]);
+    // A gap at the start of a bucket must not shift the bar's time.
+    const gapped = resample(hourly.slice(1), '4h');
+    expect(gapped[0].time).toBe(0);
+  });
+
+  it('can anchor intraday buckets to a broker grid (e.g. hourly bars at :45)', () => {
+    const fiveMin: Candle[] = Array.from({ length: 24 }, (_, i) => ({ time: 3600 * 13 + i * 300, open: i, high: i + 1, low: i - 1, close: i, volume: 1 }));
+    const anchor = 3600 * 13 + 45 * 60; // a 13:45 bar from the broker
+    const r = resample(fiveMin, '1h', 0, anchor);
+    // 13:00..14:55 spans the 12:45, 13:45 and 14:45 broker bars.
+    expect(r.map((c) => c.time)).toEqual([3600 * 12 + 45 * 60, 3600 * 13 + 45 * 60, 3600 * 14 + 45 * 60]);
+    expect(r[0]).toMatchObject({ open: 0, close: 8 }); // 13:00..13:40 belong to the 12:45 bar
+    expect(r[1].open).toBe(9);
   });
 
   it('infers the timeframe from bar spacing', () => {

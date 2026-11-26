@@ -75,6 +75,7 @@ built to produce the outputs that site documents (see `research/FEATURES.md`).
 
 ## Validation
 
-`npm test` runs 53 checks: indicator reference values and identities, synthetic
+`npm test` runs 64 checks: indicator reference values and identities, synthetic
 uptrend/downtrend/range/sweep/trap/FVG fixtures, parsers against recorded Yahoo and
-Binance responses, CSV formats, resampling, and watchlist parsing.
+Binance responses, MT4 `.hst` v400/v401 decoding and source selection, CSV formats,
+resampling, and watchlist parsing.

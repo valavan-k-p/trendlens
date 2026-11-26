@@ -16,7 +16,9 @@ const ASSET_LABEL: Record<SymbolInfo['assetClass'], string> = {
   other: 'Other',
 };
 
-export const SymbolSearch = forwardRef<SymbolSearchHandle, { onSelect: (s: SymbolInfo) => void; favorites: SymbolInfo[] }>(function SymbolSearch({ onSelect, favorites }, ref) {
+const tagFor = (s: SymbolInfo) => (s.provider === 'mt4' ? 'MT4' : s.provider === 'binance' ? 'Binance' : ASSET_LABEL[s.assetClass]);
+
+export const SymbolSearch = forwardRef<SymbolSearchHandle, { onSelect: (s: SymbolInfo) => void; favorites: SymbolInfo[]; mt4Symbols: SymbolInfo[] }>(function SymbolSearch({ onSelect, favorites, mt4Symbols }, ref) {
   const input = useRef<HTMLInputElement>(null);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
@@ -51,7 +53,9 @@ export const SymbolSearch = forwardRef<SymbolSearchHandle, { onSelect: (s: Symbo
     return () => clearTimeout(timer);
   }, [q]);
 
-  const list = q.trim() ? results : favorites;
+  // With an empty box, show favourites followed by every MT4 instrument.
+  const browse = [...favorites, ...mt4Symbols.filter((m) => !favorites.some((f) => f.provider === m.provider && f.symbol === m.symbol))];
+  const list = q.trim() ? results : browse;
 
   const choose = (s: SymbolInfo) => {
     onSelect(s);
@@ -92,16 +96,16 @@ export const SymbolSearch = forwardRef<SymbolSearchHandle, { onSelect: (s: Symbo
           }
         }}
       />
-      {open && (q.trim() || favorites.length > 0) && (
+      {open && (q.trim() || browse.length > 0) && (
         <div className="search-results">
-          {!q.trim() && <div className="search-note">Favourites</div>}
+          {!q.trim() && <div className="search-note">{favorites.length ? 'Favourites, then MetaTrader 4 instruments' : 'MetaTrader 4 instruments'}</div>}
           {list.map((s, i) => (
             <div key={`${s.provider}:${s.symbol}`} className={`search-item ${i === sel ? 'sel' : ''}`} onMouseDown={() => choose(s)} onMouseEnter={() => setSel(i)}>
               <b>{s.symbol}</b>
               <small>
                 {s.name} {s.exchange ? `· ${s.exchange}` : ''}
               </small>
-              <span className="tag">{s.provider === 'binance' ? 'Binance' : ASSET_LABEL[s.assetClass]}</span>
+              <span className={`tag ${s.provider === 'mt4' ? 'tag-mt4' : ''}`}>{tagFor(s)}</span>
             </div>
           ))}
           {q.trim() && busy && (
@@ -112,7 +116,7 @@ export const SymbolSearch = forwardRef<SymbolSearchHandle, { onSelect: (s: Symbo
           {q.trim() && !busy && results.length === 0 && <div className="search-note">No matches. Press Enter to load “{q.trim().toUpperCase()}” directly.</div>}
           {q.trim() && (
             <div className="search-note" style={{ borderTop: '1px solid var(--border)' }}>
-              Tips: NSE stocks end in <b>.NS</b> (RELIANCE.NS), BSE in <b>.BO</b>, indices start with <b>^</b> (^NSEI), forex ends in <b>=X</b> (EURUSD=X).
+              <b>MT4</b> results come from your MetaTrader 4 history. Online tips: NSE stocks end in <b>.NS</b> (RELIANCE.NS), BSE in <b>.BO</b>, indices start with <b>^</b> (^NSEI), forex ends in <b>=X</b> (EURUSD=X).
             </div>
           )}
         </div>

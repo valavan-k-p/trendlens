@@ -20,8 +20,16 @@ describe('watchlist parsing', () => {
     ]);
   });
 
+  it('reads MT4-prefixed symbols in their original case', () => {
+    expect(parseWatchlist('MT4:USOil=USOIL, mt4:NIFTY#, MT4:SENSEX-FUT')).toEqual([
+      { symbol: 'USOil', label: 'USOIL', provider: 'mt4' },
+      { symbol: 'NIFTY#', label: undefined, provider: 'mt4' },
+      { symbol: 'SENSEX-FUT', label: undefined, provider: 'mt4' },
+    ]);
+  });
+
   it('round-trips through formatWatchlist', () => {
-    const text = 'EURUSD=X=EURUSD, GC=F=GOLD, AAPL, BTCUSDT=BTCUSD';
+    const text = 'MT4:MCRUDEOIL=MCX CRUDE, EURUSD=X=EURUSD, GC=F=GOLD, AAPL, BTCUSDT=BTCUSD';
     expect(formatWatchlist(parseWatchlist(text))).toBe(text);
   });
 });

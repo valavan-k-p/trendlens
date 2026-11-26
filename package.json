@@ -46,6 +46,16 @@
       "build/icon.png",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "resources/mt4",
+        "to": "mt4",
+        "filter": [
+          "TrendLensFeed.mq4",
+          "TrendLensFeed.ex4"
+        ]
+      }
+    ],
     "win": {
       "target": [
         {

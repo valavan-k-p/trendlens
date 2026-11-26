@@ -42,7 +42,7 @@ export interface SymbolInfo {
   currency?: string;
 }
 
-export type ProviderId = 'yahoo' | 'binance' | 'csv';
+export type ProviderId = 'mt4' | 'yahoo' | 'binance' | 'csv';
 
 export interface SeriesMeta {
   symbol: string;
@@ -55,6 +55,10 @@ export interface SeriesMeta {
   provider: ProviderId;
   /** True when the provider reports no real traded volume (forex, many indices). */
   volumeAvailable: boolean;
+  /** When the underlying data was last written (ms epoch), for local sources like MT4. */
+  updatedAt?: number;
+  /** Set when bars were resampled from a finer source timeframe. */
+  sourcePeriod?: Timeframe;
 }
 
 export interface Series {

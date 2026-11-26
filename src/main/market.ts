@@ -4,6 +4,7 @@ import * as binance from '@core/data/binance';
 import { looksLikeBinancePair, type SeriesRequest } from '@core/data';
 import type { Quote, Series, SymbolInfo } from '@core/types';
 import type { WatchItem } from '../shared/api';
+import * as mt4 from './mt4';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) TrendLens/1.0';
 const TIMEOUT_MS = 15000;
@@ -36,6 +37,8 @@ const cache = new Map<string, { at: number; value: Series }>();
 const CACHE_MS: Record<string, number> = { '1m': 15_000, '5m': 30_000, '15m': 45_000, '30m': 60_000, '1h': 120_000 };
 
 export async function getSeries(req: SeriesRequest): Promise<Series> {
+  // MT4 files are local and cached by modification time inside the mt4 module.
+  if (req.provider === 'mt4') return mt4.getSeries(req.symbol, req.timeframe);
   const key = `${req.provider}:${req.symbol}:${req.timeframe}`;
   const ttl = CACHE_MS[req.timeframe] ?? 300_000;
   const hit = cache.get(key);
@@ -51,22 +54,26 @@ export async function getSeries(req: SeriesRequest): Promise<Series> {
 
 let binanceList: { at: number; data: unknown } | undefined;
 
-export async function search(query: string): Promise<SymbolInfo[]> {
+/** MT4 symbols first; online results follow unless the user chose MT4 only. */
+export async function search(query: string, includeOnline = true): Promise<SymbolInfo[]> {
   const q = query.trim();
   if (!q) return [];
+  const local = mt4.search(q, 12);
+  if (!includeOnline) return local;
   const yahooP = getJson(yahoo.searchUrl(q)).then(yahoo.parseSearch).catch(() => [] as SymbolInfo[]);
   const binanceP = (async () => {
     if (!binanceList || Date.now() - binanceList.at > 3_600_000) binanceList = { at: Date.now(), data: await getJson(binance.allPricesUrl) };
     return binance.searchSymbols(binanceList.data, q, looksLikeBinancePair(q.toUpperCase()) ? 6 : 4);
   })().catch(() => [] as SymbolInfo[]);
   const [y, b] = await Promise.all([yahooP, binanceP]);
-  return [...y, ...b];
+  return [...local, ...y, ...b];
 }
 
 export async function getQuotes(items: WatchItem[]): Promise<Quote[]> {
+  const mSyms = items.filter((i) => i.provider === 'mt4').map((i) => i.symbol);
   const ySyms = items.filter((i) => i.provider === 'yahoo').map((i) => i.symbol);
   const bSyms = items.filter((i) => i.provider === 'binance').map((i) => i.symbol.toUpperCase());
-  const jobs: Promise<Quote[]>[] = [];
+  const jobs: Promise<Quote[]>[] = [Promise.resolve(mSyms.length ? mt4.getQuotes(mSyms) : [])];
   for (let i = 0; i < ySyms.length; i += 20)
     jobs.push(getJson(yahoo.sparkUrl(ySyms.slice(i, i + 20))).then(yahoo.parseSpark).catch(() => []));
   if (bSyms.length) jobs.push(getJson(binance.tickerUrl(bSyms)).then(binance.parseTickers).catch(() => []));

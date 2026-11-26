@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TIMEFRAMES, type Timeframe } from '@core/types';
 import { formatWatchlist, parseWatchlist } from '@core/watchlist';
-import type { Settings, WatchItem } from '../../../shared/api';
+import type { Mt4Status, Settings, WatchItem } from '../../../shared/api';
 
 function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
@@ -26,10 +26,44 @@ export function SettingsDialog({ settings, onClose, onSaved }: { settings: Setti
   const [us, setUs] = useState(toText(settings.usWatchlist));
   const [india, setIndia] = useState(toText(settings.indiaWatchlist));
   const [err, setErr] = useState<string | null>(null);
+  const [source, setSource] = useState<Settings['dataSource']>(settings.dataSource);
+  const [mt4, setMt4] = useState<Mt4Status | null>(null);
+  const [folder, setFolder] = useState(settings.mt4Folder);
+
+  useEffect(() => {
+    void window.trendlens.mt4Status().then(setMt4);
+  }, [folder]);
+
+  const [installing, setInstalling] = useState(false);
+  const [installMsg, setInstallMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const installFeed = async () => {
+    setInstalling(true);
+    try {
+      const res = await window.trendlens.installMt4Feed();
+      const ok = res.filter((r) => r.ok);
+      const bad = res.filter((r) => !r.ok);
+      setInstallMsg({
+        ok: bad.length === 0 && ok.length > 0,
+        text: ok.length
+          ? `TrendLensFeed copied into ${ok.length} MT4 folder(s). Now refresh Expert Advisors in MT4 and attach it to a chart.${bad.length ? ` Failed: ${bad.map((b) => b.error).join('; ')}` : ''}`
+          : `Nothing installed: ${bad.map((b) => b.error).join('; ') || 'no MT4 data folder found'}`,
+      });
+      setMt4(await window.trendlens.mt4Status());
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  const pickFolder = async () => {
+    const s = await window.trendlens.pickMt4Folder();
+    setFolder(s.mt4Folder);
+    onSaved(s);
+  };
 
   const save = async () => {
     try {
       let s = await window.trendlens.saveSettings({
+        dataSource: source,
         theme,
         defaultTimeframe: tf,
         refreshSeconds: Math.max(0, Math.min(600, Number(refresh) || 0)),
@@ -51,6 +85,68 @@ export function SettingsDialog({ settings, onClose, onSaved }: { settings: Setti
   return (
     <Modal onClose={onClose}>
       <h2>Settings</h2>
+      <h3>Chart data source</h3>
+      <div className="field">
+        <label>Primary source</label>
+        <select className="input" value={source} onChange={(e) => setSource(e.target.value as Settings['dataSource'])}>
+          <option value="mt4">MetaTrader 4 (local history)</option>
+          <option value="online">Online (Yahoo Finance / Binance)</option>
+        </select>
+      </div>
+      <div className="field">
+        <label>MetaTrader 4</label>
+        <div>
+          {mt4 === null ? (
+            <span className="spinner" />
+          ) : mt4.available ? (
+            <span className="tone-bull">
+              Found {mt4.symbols} symbols · {mt4.terminals.flatMap((t) => t.servers).join(', ')}
+            </span>
+          ) : (
+            <span className="tone-warn">No MT4 history found</span>
+          )}
+          {mt4 && (
+            <div style={{ fontSize: 12, marginTop: 4 }} className={mt4.liveFeed ? 'tone-bull' : 'tone-warn'}>
+              {mt4.liveFeed ? `● Live feed (${mt4.liveFeeds.join(', ')}): ${mt4.liveSymbols.join(', ')}` : 'Live feed off — attach TrendLensFeed to a chart in MT4 for live bars'}
+            </div>
+          )}
+          {mt4?.terminals.map((t) => (
+            <div key={t.dataDir} style={{ color: 'var(--faint)', fontSize: 11.5, wordBreak: 'break-all' }}>
+              {t.installDir ? `${t.installDir} → ` : ''}
+              {t.dataDir}
+              <span className={t.feedInstalled ? 'tone-bull' : 'tone-warn'} style={{ marginLeft: 6 }}>
+                {t.feedInstalled ? '· TrendLensFeed installed' : '· feed not installed'}
+              </span>
+              {t.feedInstalled && (
+                <button className="btn btn-sm" style={{ marginLeft: 6, padding: '0 6px' }} onClick={() => void window.trendlens.openMt4Experts(t.dataDir)}>
+                  Open Experts folder
+                </button>
+              )}
+            </div>
+          ))}
+          <button className="btn btn-sm" style={{ marginTop: 6, marginRight: 6 }} disabled={!mt4?.terminals.length || installing} onClick={() => void installFeed()}>
+            {installing ? <span className="spinner" /> : 'Install MT4 live feed'}
+          </button>
+          <button className="btn btn-sm" style={{ marginTop: 6 }} onClick={() => void pickFolder()}>
+            {folder ? 'Change extra MT4 folder…' : 'Add MT4 data folder…'}
+          </button>
+          {folder && <div style={{ color: 'var(--faint)', fontSize: 11.5, wordBreak: 'break-all' }}>Extra folder: {folder}</div>}
+        </div>
+      </div>
+      {installMsg && <div className={installMsg.ok ? 'tone-bull' : 'tone-bear'} style={{ fontSize: 12, margin: '6px 0' }}>{installMsg.text}</div>}
+      <div className="card" style={{ fontSize: 12, margin: '8px 0', padding: '8px 12px' }}>
+        <b>Live feed setup (once per MT4):</b>
+        <ol style={{ margin: '4px 0 0', paddingLeft: 18, lineHeight: 1.6 }}>
+          <li>Click <b>Install MT4 live feed</b> above (copies the TrendLensFeed EA into MT4's Experts folder).</li>
+          <li>In MT4's Navigator, right-click <b>Expert Advisors → Refresh</b>.</li>
+          <li>Drag <b>TrendLensFeed</b> onto any chart and turn <b>AutoTrading</b> on. The EA has no trading code; MT4 just needs AutoTrading on to run any EA.</li>
+          <li>Optional: in its inputs, list the symbols to stream (empty = that chart plus your Market Watch instruments).</li>
+        </ol>
+      </div>
+      <div style={{ color: 'var(--faint)', fontSize: 12 }}>
+        TrendLens reads MT4's history files read-only. Keep MetaTrader 4 running with a chart of each symbol (and timeframe) open so its files stay current; missing timeframes are built
+        from finer MT4 bars. Symbols MT4 does not carry use online data.
+      </div>
       <h3>General</h3>
       <div className="field">
         <label>Theme</label>
@@ -77,7 +173,8 @@ export function SettingsDialog({ settings, onClose, onSaved }: { settings: Setti
 
       <h3>Watchlists</h3>
       <div style={{ color: 'var(--faint)', fontSize: 12, marginBottom: 6 }}>
-        Comma-separated Yahoo or Binance symbols. Add a display label with <code>SYMBOL=Label</code>, e.g. <code>GC=F=GOLD</code>, <code>^NSEI=NIFTY</code>.
+        Comma-separated symbols. Prefix MetaTrader 4 symbols with <code>MT4:</code> (e.g. <code>MT4:MCRUDEOIL</code>); others are Yahoo or Binance. Add a display label with{' '}
+        <code>SYMBOL=Label</code>, e.g. <code>MT4:MNAG=MCX NATGAS</code>, <code>GC=F=GOLD</code>.
       </div>
       <div className="field">
         <label>Ticker tape</label>

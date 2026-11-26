@@ -20,6 +20,17 @@ type View = 'analyzer' | 'markets' | 'upload' | 'history';
 const STAGES = ['Symbol', 'Timeframe', 'Context', 'Structure', 'Momentum', 'Risk view'];
 const INTRADAY: Timeframe[] = ['1m', '5m', '15m', '30m', '1h', '4h'];
 
+const PROVIDER_LABEL: Record<SymbolInfo['provider'], string> = { mt4: 'MetaTrader 4', yahoo: 'Yahoo Finance', binance: 'Binance', csv: 'CSV file' };
+
+function ago(ms: number): string {
+  const m = Math.round(ms / 60_000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `${h} h ago`;
+  return `${Math.round(h / 24)} days ago`;
+}
+
 const cleanError = (e: unknown) => String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 
 export function App() {
@@ -37,6 +48,8 @@ export function App() {
   const [quotesAt, setQuotesAt] = useState(0);
   const [dialog, setDialog] = useState<'settings' | 'help' | null>(null);
   const [toast, setToast] = useState<{ msg: string; error?: boolean } | null>(null);
+  const [mt4Symbols, setMt4Symbols] = useState<SymbolInfo[]>([]);
+  const [now, setNow] = useState(Date.now());
   const searchRef = useRef<SymbolSearchHandle>(null);
   const loadSeq = useRef(0);
 
@@ -57,6 +70,17 @@ export function App() {
   useEffect(() => {
     if (settings) document.documentElement.dataset.theme = settings.theme;
   }, [settings?.theme]);
+
+  // MT4 instrument list (re-scanned periodically so newly opened MT4 charts appear).
+  useEffect(() => {
+    const load = () => void window.trendlens.mt4Instruments().then(setMt4Symbols).catch(() => setMt4Symbols([]));
+    load();
+    const t = setInterval(() => {
+      load();
+      setNow(Date.now());
+    }, 30_000);
+    return () => clearInterval(t);
+  }, [settings?.mt4Folder, settings?.dataSource]);
 
   // ---- data loading
   const loadSeries = useCallback(
@@ -100,7 +124,13 @@ export function App() {
     async (quiet = false) => {
       if (!series || !symbol) return;
       if (series.candles.length < MIN_BARS) {
-        notify(`Only ${series.candles.length} bars available — at least ${MIN_BARS} are needed. Try a longer timeframe.`, true);
+        notify(
+          `Only ${series.candles.length} bars available — at least ${MIN_BARS} are needed. ` +
+            (symbol.provider === 'mt4'
+              ? 'In MetaTrader 4, open this chart and press Home (or scroll left) to download more history, or pick a shorter timeframe.'
+              : 'Try a shorter timeframe.'),
+          true,
+        );
         return;
       }
       try {
@@ -139,8 +169,11 @@ export function App() {
 
   // ---- auto refresh of chart and quotes
   useEffect(() => {
-    if (!settings || settings.refreshSeconds <= 0 || !INTRADAY.includes(timeframe) || symbol?.provider === 'csv') return;
-    const t = setInterval(() => void loadSeries(true), settings.refreshSeconds * 1000);
+    // MT4 files are local and cheap to re-read, so every MT4 timeframe follows the live bar.
+    if (!settings || settings.refreshSeconds <= 0 || symbol?.provider === 'csv' || (!INTRADAY.includes(timeframe) && symbol?.provider !== 'mt4')) return;
+    // MT4's live feed is local, so poll it every few seconds.
+    const secs = symbol?.provider === 'mt4' ? Math.min(5, settings.refreshSeconds) : settings.refreshSeconds;
+    const t = setInterval(() => void loadSeries(true), secs * 1000);
     return () => clearInterval(t);
   }, [settings, timeframe, symbol, loadSeries]);
 
@@ -249,6 +282,12 @@ export function App() {
   const prev = series?.candles[series.candles.length - 2];
   const chg = last && prev ? ((last.close - prev.close) / prev.close) * 100 : undefined;
   const dayQuote = symbol ? quotes.get(symbol.symbol.toUpperCase()) : undefined;
+  // MT4 charts refresh every few seconds, faster than quotes, so their last bar is the freshest price.
+  const headPrice = symbol?.provider === 'mt4' && last ? last.close : (dayQuote?.price ?? last?.close);
+  const headPct =
+    dayQuote && Number.isFinite(dayQuote.previousClose) && dayQuote.previousClose !== 0 && headPrice !== undefined
+      ? ((headPrice - dayQuote.previousClose) / dayQuote.previousClose) * 100
+      : chg;
   const isFav = !!symbol && settings.favorites.some((f) => f.symbol === symbol.symbol && f.provider === symbol.provider);
   const ind = settings.indicators;
 
@@ -274,7 +313,7 @@ export function App() {
           ))}
         </nav>
         <div className="spacer" />
-        <SymbolSearch ref={searchRef} onSelect={openSymbol} favorites={settings.favorites} />
+        <SymbolSearch ref={searchRef} onSelect={openSymbol} favorites={settings.favorites} mt4Symbols={mt4Symbols} />
         <button className="icon-btn" title="Import CSV (Ctrl+O)" onClick={() => void importCsv()}>
           CSV
         </button>
@@ -289,7 +328,7 @@ export function App() {
       <TickerTape
         items={settings.tickerTape}
         quotes={quotes}
-        onPick={(w) => openSymbol({ symbol: w.symbol, name: w.label ?? w.symbol, exchange: '', assetClass: w.provider === 'binance' ? 'crypto' : 'other', provider: w.provider })}
+        onPick={(w) => openSymbol({ symbol: w.symbol, name: w.label ?? w.symbol, exchange: w.provider === 'mt4' ? 'MT4' : '', assetClass: w.provider === 'binance' ? 'crypto' : 'other', provider: w.provider })}
       />
 
       <main className="main">
@@ -313,10 +352,8 @@ export function App() {
                 </span>
                 {last && (
                   <span className="step" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 0 }}>
-                    <span className="price">{formatPrice(dayQuote?.price ?? last.close)}</span>
-                    <span className={`chg ${(dayQuote?.changePct ?? chg ?? 0) >= 0 ? 'up' : 'down'}`}>
-                      {dayQuote ? `${formatPct(dayQuote.changePct)} today` : `${formatPct(chg)} last bar`}
-                    </span>
+                    <span className="price">{formatPrice(headPrice)}</span>
+                    <span className={`chg ${(headPct ?? 0) >= 0 ? 'up' : 'down'}`}>{dayQuote && Number.isFinite(dayQuote.previousClose) ? `${formatPct(headPct)} today` : `${formatPct(headPct)} last bar`}</span>
                   </span>
                 )}
                 <span className="step-arrow">→</span>
@@ -430,7 +467,9 @@ export function App() {
             </aside>
           </div>
         )}
-        {view === 'markets' && <MarketsView us={settings.usWatchlist} india={settings.indiaWatchlist} global={settings.tickerTape} quotes={quotes} onOpen={openSymbol} lastUpdate={quotesAt} />}
+        {view === 'markets' && (
+          <MarketsView us={settings.usWatchlist} india={settings.indiaWatchlist} global={settings.tickerTape} quotes={quotes} onOpen={openSymbol} lastUpdate={quotesAt} mt4Symbols={mt4Symbols} />
+        )}
         {view === 'upload' && <UploadView hasApiKey={settings.hasApiKey} currentReport={report} onOpenSettings={() => setDialog('settings')} notify={notify} />}
         {view === 'history' && (
           <HistoryView
@@ -446,10 +485,30 @@ export function App() {
       </main>
 
       <footer className="statusbar">
-        <span>{series ? `${series.candles.length} bars · ${series.meta.provider === 'binance' ? 'Binance' : series.meta.provider === 'csv' ? 'CSV file' : 'Yahoo Finance'}${series.meta.timezone ? ` · ${series.meta.timezone}` : ''}` : 'No data'}</span>
+        <span>
+          {series
+            ? `${series.candles.length} bars · ${PROVIDER_LABEL[series.meta.provider]}${series.meta.provider === 'mt4' && series.meta.exchange ? ` (${series.meta.exchange.replace(/^MT4 · /, '')})` : ''}${series.meta.timezone ? ` · ${series.meta.timezone}` : ''}${series.meta.sourcePeriod ? ` · built from ${series.meta.sourcePeriod} bars` : ''}`
+            : 'No data'}
+        </span>
+        {series?.meta.provider === 'mt4' &&
+          (series.meta.timezone?.includes('live') ? (
+            <span className="live-ok" title="Live bars from MetaTrader 4 via the MarketDataExporter EA">
+              <span className="live-dot" />
+              MT4 live
+            </span>
+          ) : (
+            series.meta.updatedAt && (
+              <span className={now - series.meta.updatedAt > 15 * 60_000 ? 'warn' : ''} title="When MetaTrader 4 data for this chart was last written">
+                MT4 data updated {ago(now - series.meta.updatedAt)}
+                {now - series.meta.updatedAt > 15 * 60_000 ? ' — run MT4 with the TrendLensFeed EA attached for live bars (Settings → Install MT4 live feed)' : ''}
+              </span>
+            )
+          ))}
         {error && <span className="err">{error}</span>}
         <span className="spacer" />
-        <span>{settings.refreshSeconds > 0 ? `Auto refresh ${settings.refreshSeconds}s` : 'Auto refresh off'}</span>
+        <span>
+          {settings.refreshSeconds <= 0 ? 'Auto refresh off' : `Auto refresh ${symbol?.provider === 'mt4' ? Math.min(5, settings.refreshSeconds) : settings.refreshSeconds}s`}
+        </span>
         <span>Educational use only · not investment advice</span>
       </footer>
 

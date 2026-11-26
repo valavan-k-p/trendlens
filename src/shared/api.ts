@@ -5,8 +5,19 @@ import type { ProviderId, Quote, Series, SymbolInfo, Timeframe } from '@core/typ
 
 export interface WatchItem {
   symbol: string;
-  provider: 'yahoo' | 'binance';
+  provider: 'mt4' | 'yahoo' | 'binance';
   label?: string;
+}
+
+export interface Mt4Status {
+  available: boolean;
+  terminals: { dataDir: string; installDir?: string; servers: string[]; feedInstalled?: boolean }[];
+  symbols: number;
+  newestUpdate: number;
+  /** True while a live EA heartbeat (TrendLensFeed or MarketDataExporter) is current. */
+  liveFeed: boolean;
+  liveFeeds: string[];
+  liveSymbols: string[];
 }
 
 export interface Settings {
@@ -22,6 +33,10 @@ export interface Settings {
   indicators: { ema20: boolean; ema50: boolean; ema200: boolean; vwap: boolean; bollinger: boolean; supertrend: boolean; levels: boolean; zones: boolean; markers: boolean; volume: boolean };
   lowerPane: 'rsi' | 'macd' | 'stochastic' | 'adx' | 'none';
   aiModel: string;
+  /** 'mt4': MetaTrader 4 history is the primary chart source; online providers fill gaps. */
+  dataSource: 'mt4' | 'online';
+  /** Optional extra MT4 data folder (the one containing "history"). */
+  mt4Folder?: string;
   /** True when an encrypted Anthropic API key is stored (the key itself never reaches the renderer). */
   hasApiKey: boolean;
 }
@@ -54,6 +69,11 @@ export interface TrendLensApi {
   getSeries(req: SeriesRequest): Promise<Series>;
   search(query: string): Promise<SymbolInfo[]>;
   getQuotes(items: WatchItem[]): Promise<Quote[]>;
+  mt4Status(): Promise<Mt4Status>;
+  mt4Instruments(): Promise<SymbolInfo[]>;
+  pickMt4Folder(): Promise<Settings>;
+  installMt4Feed(): Promise<{ dataDir: string; experts: string; ok: boolean; error?: string }[]>;
+  openMt4Experts(dataDir: string): Promise<void>;
   importCsv(): Promise<Series | null>;
   getSettings(): Promise<Settings>;
   saveSettings(patch: Partial<Settings>): Promise<Settings>;

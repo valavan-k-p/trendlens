@@ -5,8 +5,11 @@ import { timeframeSeconds } from '../types';
  * Aggregates candles into a coarser timeframe. Buckets are aligned to the
  * exchange-local day (via `gmtOffset`, seconds east of UTC) so 4h bars start at
  * local midnight, 04:00, 08:00, ...; weekly bars start on Monday.
+ *
+ * `anchor` (intraday only) is any bar time on the target grid, e.g. a broker's
+ * 13:45 hourly bar: buckets then start at :45 to match that broker's chart.
  */
-export function resample(candles: Candle[], to: Timeframe, gmtOffset = 0): Candle[] {
+export function resample(candles: Candle[], to: Timeframe, gmtOffset = 0, anchor?: number): Candle[] {
   const size = timeframeSeconds(to);
   const out: Candle[] = [];
   let bucket = NaN;
@@ -20,13 +23,16 @@ export function resample(candles: Candle[], to: Timeframe, gmtOffset = 0): Candl
     } else if (to === '1mo') {
       const d = new Date(local * 1000);
       b = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000 - gmtOffset;
+    } else if (anchor !== undefined && size < 86400) {
+      b = Math.floor((c.time - anchor) / size) * size + anchor;
     } else {
       b = Math.floor(local / size) * size - gmtOffset;
     }
     const last = out[out.length - 1];
     if (b !== bucket || !last) {
       bucket = b;
-      out.push({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume });
+      // Stamp the bar with its period start (e.g. 11:00), not the first source bar inside it (11:05).
+      out.push({ time: b, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume });
     } else {
       last.high = Math.max(last.high, c.high);
       last.low = Math.min(last.low, c.low);

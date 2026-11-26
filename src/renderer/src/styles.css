@@ -71,6 +71,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tick { display: inline-flex; gap: 7px; cursor: pointer; font-variant-numeric: tabular-nums; }
 .tick b { color: var(--text); font-weight: 600; }
 .tick span { color: var(--muted); }
+.tick.stale, tr.stale td { opacity: 0.5; }
 @keyframes scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 
 .up { color: var(--bull) !important; }
@@ -127,6 +128,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .search-item small { color: var(--muted); grid-column: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .search-item .tag { grid-row: 1 / span 2; grid-column: 2; align-self: center; font-size: 10.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; }
 .search-note { padding: 8px 12px; color: var(--muted); font-size: 12px; }
+.search-item .tag.tag-mt4 { color: var(--accent); border-color: var(--accent); }
+.statusbar .warn { color: var(--warn); }
+.statusbar .live-ok { color: var(--bull); }
 
 /* ---------- report ---------- */
 .report { padding: 14px; display: flex; flex-direction: column; gap: 12px; }

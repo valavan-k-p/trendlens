@@ -5,8 +5,26 @@ import { parseCsv } from '@core/data/csv';
 import * as market from './market';
 import * as store from './store';
 import { reviewChart } from './ai';
+import * as mt4 from './mt4';
+import { installFeed } from './mt4install';
+import type { Settings, WatchItem } from '../shared/api';
 
 let win: BrowserWindow | null = null;
+
+const FALLBACK_DEFAULT: Settings['defaultSymbol'] = { symbol: '^NSEI', name: 'NIFTY 50', exchange: 'NSE', assetClass: 'index', provider: 'yahoo' };
+
+/**
+ * Makes MT4 the primary source when its history exists: MT4 watch items that the
+ * terminal does not carry are dropped, and without MT4 the defaults fall back to
+ * online data so the app still opens on a working chart.
+ */
+function resolveSettings(s: Settings): Settings {
+  const hasMt4 = s.dataSource === 'mt4' && mt4.status().available;
+  const keep = (items: WatchItem[]) => items.filter((w) => w.provider !== 'mt4' || (hasMt4 && mt4.hasSymbol(w.symbol)));
+  let defaultSymbol = s.defaultSymbol;
+  if (defaultSymbol.provider === 'mt4' && !(hasMt4 && mt4.hasSymbol(defaultSymbol.symbol))) defaultSymbol = FALLBACK_DEFAULT;
+  return { ...s, defaultSymbol, tickerTape: keep(s.tickerTape), usWatchlist: keep(s.usWatchlist), indiaWatchlist: keep(s.indiaWatchlist) };
+}
 
 function createWindow(): void {
   const settings = store.getSettings();
@@ -101,6 +119,7 @@ function buildMenu(): void {
 
 function registerIpc(): void {
   ipcMain.handle('data:series', (_e, req) => market.getSeries(req));
+  // MT4 symbols are listed first; online symbols follow for instruments MT4 does not carry.
   ipcMain.handle('data:search', (_e, q: string) => market.search(q));
   ipcMain.handle('data:quotes', (_e, items) => market.getQuotes(items));
   ipcMain.handle('data:importCsv', async () => {
@@ -109,13 +128,31 @@ function registerIpc(): void {
     const p = r.filePaths[0];
     return parseCsv(await readFile(p, 'utf8'), basename(p).replace(/\.(csv|txt)$/i, ''));
   });
-  ipcMain.handle('settings:get', () => store.getSettings());
+  ipcMain.handle('settings:get', () => resolveSettings(store.getSettings()));
   ipcMain.handle('settings:save', (_e, patch) => {
     const s = store.saveSettings(patch);
     nativeTheme.themeSource = s.theme;
-    return s;
+    mt4.setMt4Folder(s.mt4Folder);
+    return resolveSettings(s);
   });
-  ipcMain.handle('settings:apiKey', (_e, key: string | null) => store.setApiKey(key));
+  ipcMain.handle('settings:apiKey', (_e, key: string | null) => resolveSettings(store.setApiKey(key)));
+  ipcMain.handle('mt4:status', () => mt4.status());
+  ipcMain.handle('mt4:installFeed', () => installFeed(mt4.feedTargets()));
+  ipcMain.handle('mt4:openExperts', (_e, dataDir: string) => {
+    // Only open folders TrendLens itself detected as MT4 data folders.
+    if (mt4.feedTargets().includes(dataDir)) return shell.openPath(join(dataDir, 'MQL4', 'Experts'));
+  });
+  ipcMain.handle('mt4:instruments', () => mt4.instruments());
+  ipcMain.handle('mt4:pickFolder', async () => {
+    const r = await dialog.showOpenDialog(win!, {
+      title: 'Choose the MetaTrader 4 data folder (the one that contains "history")',
+      properties: ['openDirectory'],
+    });
+    if (r.canceled || !r.filePaths[0]) return resolveSettings(store.getSettings());
+    const s = store.saveSettings({ mt4Folder: r.filePaths[0] });
+    mt4.setMt4Folder(s.mt4Folder);
+    return resolveSettings(s);
+  });
   ipcMain.handle('history:list', () => store.listHistory());
   ipcMain.handle('history:save', (_e, entry) => store.saveHistory(entry));
   ipcMain.handle('history:delete', (_e, id: string) => store.deleteHistory(id));
@@ -133,6 +170,7 @@ function registerIpc(): void {
 
 app.whenReady().then(() => {
   app.setAppUserModelId('local.trendlens.app');
+  mt4.setMt4Folder(store.getSettings().mt4Folder);
   registerIpc();
   buildMenu();
   createWindow();

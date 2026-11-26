@@ -33,4 +33,13 @@ export function formatVolume(v: number): string {
   return v.toFixed(0);
 }
 
+/** A quote older than three days (covers weekends) is shown as stale. */
+export function isStaleQuote(time: number | undefined, nowMs = Date.now()): boolean {
+  return !!time && nowMs / 1000 - time > 3 * 86400;
+}
+
+export function formatQuoteDate(time: number): string {
+  return new Date(time * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+}
+
 export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));

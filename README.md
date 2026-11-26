@@ -38,7 +38,7 @@ npm start
 | Markets | Scrolling global ticker, NASDAQ & Indian live price tables, NIFTY / BANK NIFTY index bias |
 | AI chart review | Upload, paste or drop a chart screenshot for a structured review by Claude (needs your own Anthropic API key) |
 | History | Save reports locally, revisit, export as Markdown |
-| Data | Yahoo Finance (NSE/BSE, US, indices, forex, futures), Binance (crypto), CSV import |
+| Data | MetaTrader 4 history (primary: Indian indices, MCX, options), Yahoo Finance, Binance, CSV import |
 
 Keyboard: `Ctrl+K` search · `F5` analyse · `Ctrl+O` import CSV · `Ctrl+E` export ·
 `Ctrl+1…4` switch views · `Ctrl+,` settings.
@@ -60,6 +60,23 @@ docs/            PLAN.md, ANALYSIS.md (every rule and threshold)
 
 ## Data sources and notes
 
+- **MetaTrader 4 (primary).** TrendLens reads MT4's own chart history files (`.hst`)
+  read-only, from every data folder under `%APPDATA%\MetaQuotes\Terminal\` plus any
+  folder added in Settings. MT4 symbols are listed first in search (tagged **MT4**),
+  and the app opens on MT4's NIFTY. Your broker's MT4 includes NIFTY, BANKNIFTY,
+  SENSEX, SENSEX futures, MCX crude oil and natural gas, gold, silver and option strikes.
+  - **Live bars** need the bundled **TrendLensFeed** EA (`resources/mt4/`), because MT4
+    only saves its history files when it closes. Settings → **Install MT4 live feed**
+    copies it into MT4; then in MT4 refresh Expert Advisors, drag TrendLensFeed onto a
+    chart and keep AutoTrading on. It has no trading code and writes only to
+    `%APPDATA%\MetaQuotes\Terminal\Common\Files\TrendLens\`. TrendLens also reads the
+    MarketDataExporter EA's output (`Common\Files\MT4AI\`) if present.
+  - With the feed attached, bars match MT4 exactly (same broker bar grid, e.g. hourly
+    NIFTY bars at :45 server time). Without MT4 running, charts show the last saved data.
+  - If a timeframe's file is missing or shorter, TrendLens builds it from a finer MT4
+    timeframe that has more history (e.g. 15m from 5m).
+  - Too little history? Open the chart in MT4 and press Home to download more.
+  - Bar times are the broker's server time; tick volume is used as volume.
 - Yahoo Finance public chart/search endpoints: no key; unofficial, intended here for
   personal use; quotes for some exchanges are delayed. Indices and forex report no
   volume, so volume modules are skipped for them.
