@@ -36,7 +36,7 @@ npm start
 | Modules | Market structure (HH/HL, BOS, CHoCH), trend strength matrix, momentum + pulse, volatility regime, liquidity participation, price behaviour (S/R, round numbers, break & retest), smart money (sweeps, traps, order blocks, FVGs, equal highs/lows, A/D), multi-timeframe alignment, risk control |
 | Chart overlays | Key levels, order-block / FVG zones, structure and sweep/trap markers |
 | Markets | Scrolling global ticker, NASDAQ & Indian live price tables, NIFTY / BANK NIFTY index bias |
-| AI chart review | Upload, paste or drop a chart screenshot for a structured review by Claude (needs your own Anthropic API key) |
+| AI chart review | Upload, paste or drop a chart screenshot for a structured AI review with your own key: Claude, OpenAI, Google Gemini, OpenRouter, Groq or any OpenAI-compatible server (DeepSeek, Ollama, LM Studio) |
 | History | Save reports locally, revisit, export as Markdown |
 | Data | MetaTrader 4 history (primary: Indian indices, MCX, options), Yahoo Finance, Binance, CSV import |
 
@@ -82,5 +82,8 @@ docs/            PLAN.md, ANALYSIS.md (every rule and threshold)
   volume, so volume modules are skipped for them.
 - Binance public market data: official, no key.
 - Settings, history and the encrypted API key live in `%APPDATA%\trendlens\`.
-- The Anthropic key is encrypted with Windows DPAPI and used only by the main
-  process; each AI review is billed to your Anthropic account.
+- AI review keys are encrypted with Windows DPAPI and used only by the main process.
+  Settings → AI provider can auto-detect the service from the key (`sk-ant-` Claude,
+  `sk-` OpenAI, `AIza` Gemini, `sk-or-` OpenRouter, `gsk_` Groq); **Test** checks the key
+  and lists its models. The chart image goes only to the chosen provider, and each
+  review is billed to that account. The model must accept images.

@@ -1,4 +1,5 @@
 /** IPC contract between the renderer and the Electron main process. */
+import type { AiProviderId } from '@core/ai/providers';
 import type { AnalysisReport } from '@core/analysis/types';
 import type { SeriesRequest } from '@core/data';
 import type { ProviderId, Quote, Series, SymbolInfo, Timeframe } from '@core/types';
@@ -32,13 +33,20 @@ export interface Settings {
   favorites: SymbolInfo[];
   indicators: { ema20: boolean; ema50: boolean; ema200: boolean; vwap: boolean; bollinger: boolean; supertrend: boolean; levels: boolean; zones: boolean; markers: boolean; volume: boolean };
   lowerPane: 'rsi' | 'macd' | 'stochastic' | 'adx' | 'none';
-  aiModel: string;
+  /** AI service used for chart-image review. */
+  aiProvider: AiProviderId;
+  /** Model per provider; empty or missing means the provider's default. */
+  aiModels: Partial<Record<AiProviderId, string>>;
+  /** Base URL for the 'custom' OpenAI-compatible provider. */
+  aiBaseUrl?: string;
   /** 'mt4': MetaTrader 4 history is the primary chart source; online providers fill gaps. */
   dataSource: 'mt4' | 'online';
   /** Optional extra MT4 data folder (the one containing "history"). */
   mt4Folder?: string;
-  /** True when an encrypted Anthropic API key is stored (the key itself never reaches the renderer). */
+  /** True when the active AI provider is ready (its key is stored; keys never reach the renderer). */
   hasApiKey: boolean;
+  /** Providers that have an encrypted key stored. */
+  savedKeys: AiProviderId[];
 }
 
 export interface HistoryEntry {
@@ -62,7 +70,22 @@ export interface ChartReviewRequest {
 export interface ChartReviewResult {
   text: string;
   model: string;
+  /** Provider label, e.g. "Google Gemini". */
+  provider: string;
   refused: boolean;
+}
+
+export interface AiTestRequest {
+  provider: AiProviderId;
+  /** A key typed but not saved yet; falls back to the stored key. */
+  key?: string;
+  baseUrl?: string;
+}
+
+export interface AiTestResult {
+  ok: boolean;
+  models: string[];
+  error?: string;
 }
 
 export interface TrendLensApi {
@@ -77,7 +100,8 @@ export interface TrendLensApi {
   importCsv(): Promise<Series | null>;
   getSettings(): Promise<Settings>;
   saveSettings(patch: Partial<Settings>): Promise<Settings>;
-  setApiKey(key: string | null): Promise<Settings>;
+  setApiKey(provider: AiProviderId, key: string | null): Promise<Settings>;
+  testAi(req: AiTestRequest): Promise<AiTestResult>;
   listHistory(): Promise<HistoryEntry[]>;
   saveHistory(entry: HistoryEntry): Promise<HistoryEntry[]>;
   deleteHistory(id: string): Promise<HistoryEntry[]>;

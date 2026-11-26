@@ -87,10 +87,10 @@ export function UploadView({ hasApiKey, currentReport, onOpenSettings, notify }:
   return (
     <div className="page">
       <h2>AI chart review</h2>
-      <p className="sub">Upload, paste (Ctrl+V) or drop a chart screenshot and get a structured educational review. Uses your own Anthropic API key; the image is sent only to the Anthropic API.</p>
+      <p className="sub">Upload, paste (Ctrl+V) or drop a chart screenshot and get a structured educational review. Uses your own API key for Claude, OpenAI, Gemini, OpenRouter, Groq or any OpenAI-compatible server; the image is sent only to the provider you choose.</p>
       {!hasApiKey && (
         <div className="card" style={{ marginBottom: 14, borderColor: 'var(--warn)' }}>
-          <b className="tone-warn">API key needed.</b> AI review calls the Claude API with your key, stored encrypted on this PC.{' '}
+          <b className="tone-warn">API key needed.</b> AI review calls the AI provider you pick in Settings (Claude, OpenAI, Gemini, OpenRouter, Groq or a local server) with your key, stored encrypted on this PC.{' '}
           <button className="btn btn-sm" onClick={onOpenSettings}>
             Open settings
           </button>
@@ -141,7 +141,7 @@ export function UploadView({ hasApiKey, currentReport, onOpenSettings, notify }:
         </div>
         <div className="card" style={{ minHeight: 300 }}>
           <h4>
-            <span>Review {result ? `· ${result.model}` : ''}</span>
+            <span>Review {result ? `· ${result.provider} · ${result.model}` : ''}</span>
             {result && (
               <button className="btn btn-sm" onClick={() => void save()}>
                 Save as Markdown

@@ -2,6 +2,7 @@
 import { app, safeStorage } from 'electron';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { AI_PROVIDER_IDS, type AiProviderId } from '@core/ai/providers';
 import type { HistoryEntry, Settings } from '../shared/api';
 
 const dir = () => app.getPath('userData');
@@ -25,7 +26,7 @@ function writeJson(name: string, value: unknown): void {
   renameSync(`${p}.tmp`, p);
 }
 
-export const DEFAULT_SETTINGS: Omit<Settings, 'hasApiKey'> = {
+export const DEFAULT_SETTINGS: Omit<Settings, 'hasApiKey' | 'savedKeys'> = {
   theme: 'dark',
   defaultSymbol: { symbol: 'NIFTY', name: 'NIFTY 50 index', exchange: 'MT4', assetClass: 'index', provider: 'mt4' },
   defaultTimeframe: '15m',
@@ -70,50 +71,71 @@ export const DEFAULT_SETTINGS: Omit<Settings, 'hasApiKey'> = {
   favorites: [],
   indicators: { ema20: true, ema50: true, ema200: false, vwap: false, bollinger: false, supertrend: false, levels: true, zones: true, markers: true, volume: true },
   lowerPane: 'rsi',
-  aiModel: 'claude-opus-5-5',
+  aiProvider: 'anthropic',
+  aiModels: {},
 };
 
-interface StoredSettings extends Partial<Omit<Settings, 'hasApiKey'>> {
+interface StoredSettings extends Partial<Omit<Settings, 'hasApiKey' | 'savedKeys'>> {
+  /** Encrypted keys per AI provider. */
+  encryptedApiKeys?: Partial<Record<AiProviderId, string>>;
+  /** Legacy (v1.0): a single Anthropic key and model. */
   encryptedApiKey?: string;
+  aiModel?: string;
 }
 
+/** Reads settings.json, moving the v1.0 single Anthropic key/model into the per-provider fields. */
 function readStored(): StoredSettings {
-  return readJson<StoredSettings>('settings.json', {});
+  const s = readJson<StoredSettings>('settings.json', {});
+  if (s.encryptedApiKey) {
+    s.encryptedApiKeys = { anthropic: s.encryptedApiKey, ...(s.encryptedApiKeys ?? {}) };
+    delete s.encryptedApiKey;
+  }
+  if (s.aiModel !== undefined) {
+    if (s.aiModel && s.aiModel !== 'claude-opus-5-5') s.aiModels = { anthropic: s.aiModel, ...(s.aiModels ?? {}) };
+    delete s.aiModel;
+  }
+  return s;
 }
 
 export function getSettings(): Settings {
-  const s = readStored();
-  const { encryptedApiKey, ...rest } = s;
-  return {
+  const { encryptedApiKeys = {}, ...rest } = readStored();
+  const s = {
     ...DEFAULT_SETTINGS,
     ...rest,
     indicators: { ...DEFAULT_SETTINGS.indicators, ...(rest.indicators ?? {}) },
-    hasApiKey: !!encryptedApiKey,
+    aiModels: { ...(rest.aiModels ?? {}) },
   };
+  if (!AI_PROVIDER_IDS.includes(s.aiProvider)) s.aiProvider = 'anthropic';
+  const savedKeys = AI_PROVIDER_IDS.filter((p) => !!encryptedApiKeys[p]);
+  const ready = s.aiProvider === 'custom' ? !!s.aiBaseUrl : savedKeys.includes(s.aiProvider);
+  return { ...s, hasApiKey: ready, savedKeys };
 }
 
 export function saveSettings(patch: Partial<Settings>): Settings {
   const stored = readStored();
-  const { hasApiKey: _ignored, ...clean } = patch;
+  const { hasApiKey: _a, savedKeys: _b, ...clean } = patch;
   writeJson('settings.json', { ...stored, ...clean });
   return getSettings();
 }
 
-/** Stores the Anthropic key encrypted with the OS keychain (DPAPI on Windows). */
-export function setApiKey(key: string | null): Settings {
+/** Stores a provider's API key encrypted with the OS keychain (DPAPI on Windows); null removes it. */
+export function setApiKey(provider: AiProviderId, key: string | null): Settings {
+  if (!AI_PROVIDER_IDS.includes(provider)) throw new Error('Unknown AI provider.');
   const stored = readStored();
+  const keys = { ...(stored.encryptedApiKeys ?? {}) };
   if (key && key.trim()) {
     if (!safeStorage.isEncryptionAvailable()) throw new Error('OS encryption is unavailable; the key was not saved.');
-    stored.encryptedApiKey = safeStorage.encryptString(key.trim()).toString('base64');
+    keys[provider] = safeStorage.encryptString(key.trim()).toString('base64');
   } else {
-    delete stored.encryptedApiKey;
+    delete keys[provider];
   }
+  stored.encryptedApiKeys = keys;
   writeJson('settings.json', stored);
   return getSettings();
 }
 
-export function getApiKey(): string | undefined {
-  const enc = readStored().encryptedApiKey;
+export function getApiKey(provider: AiProviderId): string | undefined {
+  const enc = readStored().encryptedApiKeys?.[provider];
   if (!enc) return undefined;
   try {
     return safeStorage.decryptString(Buffer.from(enc, 'base64'));

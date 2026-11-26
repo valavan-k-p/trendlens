@@ -1,10 +1,11 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron';
 import { readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import type { AiProviderId } from '@core/ai/providers';
 import { parseCsv } from '@core/data/csv';
 import * as market from './market';
 import * as store from './store';
-import { reviewChart } from './ai';
+import { reviewChart, testAi } from './ai';
 import * as mt4 from './mt4';
 import { installFeed } from './mt4install';
 import type { Settings, WatchItem } from '../shared/api';
@@ -135,7 +136,7 @@ function registerIpc(): void {
     mt4.setMt4Folder(s.mt4Folder);
     return resolveSettings(s);
   });
-  ipcMain.handle('settings:apiKey', (_e, key: string | null) => resolveSettings(store.setApiKey(key)));
+  ipcMain.handle('settings:apiKey', (_e, provider: AiProviderId, key: string | null) => resolveSettings(store.setApiKey(provider, key)));
   ipcMain.handle('mt4:status', () => mt4.status());
   ipcMain.handle('mt4:installFeed', () => installFeed(mt4.feedTargets()));
   ipcMain.handle('mt4:openExperts', (_e, dataDir: string) => {
@@ -157,6 +158,7 @@ function registerIpc(): void {
   ipcMain.handle('history:save', (_e, entry) => store.saveHistory(entry));
   ipcMain.handle('history:delete', (_e, id: string) => store.deleteHistory(id));
   ipcMain.handle('ai:review', (_e, req) => reviewChart(req));
+  ipcMain.handle('ai:test', (_e, req) => testAi(req));
   ipcMain.handle('file:saveText', async (_e, name: string, content: string) => {
     const r = await dialog.showSaveDialog(win!, { defaultPath: name, filters: [{ name: 'Markdown', extensions: ['md'] }, { name: 'Text', extensions: ['txt'] }] });
     if (r.canceled || !r.filePath) return null;

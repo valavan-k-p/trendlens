@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { TIMEFRAMES, type Timeframe } from '@core/types';
+import { AI_PROVIDER_IDS, AI_PROVIDERS, detectProvider, type AiProviderId, type AiProviderSetting } from '@core/ai/providers';
 import { formatWatchlist, parseWatchlist } from '@core/watchlist';
 import type { Mt4Status, Settings, WatchItem } from '../../../shared/api';
 
@@ -20,8 +21,33 @@ export function SettingsDialog({ settings, onClose, onSaved }: { settings: Setti
   const [theme, setTheme] = useState(settings.theme);
   const [tf, setTf] = useState<Timeframe>(settings.defaultTimeframe);
   const [refresh, setRefresh] = useState(settings.refreshSeconds);
-  const [model, setModel] = useState(settings.aiModel);
   const [key, setKey] = useState('');
+  const [aiChoice, setAiChoice] = useState<AiProviderSetting>(settings.hasApiKey || settings.savedKeys.length ? settings.aiProvider : 'auto');
+  const [aiModels, setAiModels] = useState(settings.aiModels);
+  const [baseUrl, setBaseUrl] = useState(settings.aiBaseUrl ?? '');
+  const [modelOptions, setModelOptions] = useState<string[]>([]);
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const detected = key.trim() ? detectProvider(key) : undefined;
+  const aiProvider: AiProviderId = aiChoice === 'auto' ? (detected ?? settings.aiProvider) : aiChoice;
+  const aiInfo = AI_PROVIDERS[aiProvider];
+  const keySaved = settings.savedKeys.includes(aiProvider);
+  useEffect(() => {
+    setModelOptions([]);
+    setTestMsg(null);
+  }, [aiProvider]);
+
+  const testKey = async () => {
+    setTesting(true);
+    setTestMsg(null);
+    try {
+      const r = await window.trendlens.testAi({ provider: aiProvider, key: key.trim() || undefined, baseUrl: baseUrl.trim() || undefined });
+      setModelOptions(r.models);
+      setTestMsg(r.ok ? { ok: true, text: `Key works with ${aiInfo.name}${r.models.length ? ` · ${r.models.length} models available (pick one in the Model box)` : ''}.` } : { ok: false, text: r.error ?? 'Test failed.' });
+    } finally {
+      setTesting(false);
+    }
+  };
   const [tape, setTape] = useState(toText(settings.tickerTape));
   const [us, setUs] = useState(toText(settings.usWatchlist));
   const [india, setIndia] = useState(toText(settings.indiaWatchlist));
@@ -62,17 +88,20 @@ export function SettingsDialog({ settings, onClose, onSaved }: { settings: Setti
 
   const save = async () => {
     try {
+      if (aiChoice === 'auto' && key.trim() && !detected) throw new Error('TrendLens could not tell which service this API key is for. Choose the provider from the list.');
       let s = await window.trendlens.saveSettings({
         dataSource: source,
         theme,
         defaultTimeframe: tf,
         refreshSeconds: Math.max(0, Math.min(600, Number(refresh) || 0)),
-        aiModel: model.trim() || 'claude-opus-5-5',
+        aiProvider,
+        aiModels: Object.fromEntries(Object.entries(aiModels).map(([p, m]) => [p, (m ?? '').trim()]).filter(([, m]) => m)),
+        aiBaseUrl: baseUrl.trim() || undefined,
         tickerTape: fromText(tape),
         usWatchlist: fromText(us),
         indiaWatchlist: fromText(india),
       });
-      if (key.trim()) s = await window.trendlens.setApiKey(key.trim());
+      if (key.trim()) s = await window.trendlens.setApiKey(aiProvider, key.trim());
       onSaved(s);
       onClose();
     } catch (e) {
@@ -80,7 +109,7 @@ export function SettingsDialog({ settings, onClose, onSaved }: { settings: Setti
     }
   };
 
-  const clearKey = async () => onSaved(await window.trendlens.setApiKey(null));
+  const clearKey = async () => onSaved(await window.trendlens.setApiKey(aiProvider, null));
 
   return (
     <Modal onClose={onClose}>
@@ -191,21 +220,69 @@ export function SettingsDialog({ settings, onClose, onSaved }: { settings: Setti
 
       <h3>AI chart review (optional)</h3>
       <div className="field">
-        <label>Anthropic API key</label>
+        <label>AI provider</label>
+        <select className="input" value={aiChoice} onChange={(e) => setAiChoice(e.target.value as AiProviderSetting)}>
+          <option value="auto">Auto-detect from the key{aiChoice === 'auto' && key.trim() ? (detected ? ` → ${AI_PROVIDERS[detected].label}` : ' (not recognised)') : ''}</option>
+          {AI_PROVIDER_IDS.map((p) => (
+            <option key={p} value={p}>
+              {AI_PROVIDERS[p].label}
+              {settings.savedKeys.includes(p) ? ' · key saved' : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="field">
+        <label>{aiChoice === 'auto' && !key.trim() ? 'API key' : `${aiInfo.name} API key`}</label>
         <div style={{ display: 'flex', gap: 6 }}>
-          <input className="input" type="password" placeholder={settings.hasApiKey ? '•••••• saved (enter a new key to replace)' : 'sk-ant-…'} value={key} onChange={(e) => setKey(e.target.value)} />
-          {settings.hasApiKey && (
+          <input
+            className="input"
+            type="password"
+            placeholder={keySaved ? '•••••• saved (enter a new key to replace)' : aiChoice === 'auto' ? 'Paste any supported API key' : aiInfo.keyHint}
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+          />
+          <button className="btn btn-sm" disabled={testing || (!key.trim() && !keySaved && !aiInfo.keyOptional)} onClick={() => void testKey()}>
+            {testing ? <span className="spinner" /> : 'Test'}
+          </button>
+          {keySaved && (
             <button className="btn btn-sm btn-danger" onClick={() => void clearKey()}>
               Remove
             </button>
           )}
         </div>
+        {aiChoice === 'auto' && key.trim() && !detected && <div className="tone-warn" style={{ marginTop: 4, fontSize: 12 }}>Key format not recognised — choose the provider from the list above.</div>}
       </div>
+      {aiProvider === 'custom' && (
+        <div className="field">
+          <label>Server base URL</label>
+          <input className="input" placeholder="http://localhost:11434/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+        </div>
+      )}
       <div className="field">
         <label>Model</label>
-        <input className="input" value={model} onChange={(e) => setModel(e.target.value)} />
+        <input
+          className="input"
+          list="ai-models"
+          placeholder={aiInfo.defaultModel ? `${aiInfo.defaultModel} (default)` : 'model name, e.g. llava or qwen2.5vl'}
+          value={aiModels[aiProvider] ?? ''}
+          onChange={(e) => setAiModels({ ...aiModels, [aiProvider]: e.target.value })}
+        />
+        <datalist id="ai-models">
+          {modelOptions.map((m) => (
+            <option key={m} value={m} />
+          ))}
+        </datalist>
       </div>
-      <div style={{ color: 'var(--faint)', fontSize: 12 }}>The key is encrypted with Windows DPAPI and only used by the app's background process to call the Anthropic API. Each review is billed to your API account.</div>
+      {testMsg && <div className={testMsg.ok ? 'tone-bull' : 'tone-bear'} style={{ fontSize: 12, marginBottom: 6 }}>{testMsg.text}</div>}
+      <div style={{ color: 'var(--faint)', fontSize: 12 }}>
+        Keys are encrypted with Windows DPAPI and only used by the app's background process. The chart image is sent only to the provider you choose, and any
+        usage is billed to that account. {aiInfo.note ?? ''} The model must accept images.{' '}
+        {aiInfo.keysUrl && (
+          <a href="#" onClick={(e) => (e.preventDefault(), void window.trendlens.openExternal(aiInfo.keysUrl!))}>
+            Get a {aiInfo.name} key
+          </a>
+        )}
+      </div>
       {err && <div className="tone-bear" style={{ marginTop: 10 }}>{err}</div>}
       <div className="modal-actions">
         <button className="btn" onClick={onClose}>

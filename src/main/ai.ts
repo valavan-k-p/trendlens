@@ -1,9 +1,21 @@
 /**
- * Optional chart-image review with Claude, using the user's own Anthropic API key.
- * The key is decrypted here in the main process and never sent to the renderer.
+ * Optional chart-image review using the user's own API key for one of several AI providers.
+ * Keys are decrypted here in the main process and never sent to the renderer.
+ * Anthropic goes through its official SDK; every other provider through the
+ * OpenAI-compatible Chat Completions endpoint.
  */
 import Anthropic from '@anthropic-ai/sdk';
-import type { ChartReviewRequest, ChartReviewResult } from '../shared/api';
+import {
+  AI_PROVIDERS,
+  apiErrorMessage,
+  buildChatBody,
+  chatModelIds,
+  describeHttpError,
+  normalizeBaseUrl,
+  parseChatResponse,
+  type AiProviderId,
+} from '@core/ai/providers';
+import type { AiTestRequest, AiTestResult, ChartReviewRequest, ChartReviewResult } from '../shared/api';
 import { getApiKey, getSettings } from './store';
 
 const SYSTEM = `You are a technical-analysis tutor inside a personal desktop app.
@@ -24,17 +36,36 @@ Rules: describe what is visible and say plainly when something cannot be read fr
 Do not invent numbers. Do not give buy/sell instructions, position sizes, or personalised financial advice;
 frame conclusions as context and conditions. End with: "Educational review only — not financial advice."`;
 
+const TIMEOUT_MS = 180_000;
+const CUT_OFF = '\n\n_(Response was cut off at the output limit.)_';
+
 export async function reviewChart(req: ChartReviewRequest): Promise<ChartReviewResult> {
-  const apiKey = getApiKey();
-  if (!apiKey) throw new Error('Add your Anthropic API key in Settings to use AI chart review.');
-  const model = getSettings().aiModel || 'claude-opus-5-5';
-  const client = new Anthropic({ apiKey });
+  const settings = getSettings();
+  const provider = settings.aiProvider;
+  const info = AI_PROVIDERS[provider];
+  const apiKey = getApiKey(provider);
+  if (!apiKey && !info.keyOptional) throw new Error(`Add your ${info.name} API key in Settings to use AI chart review.`);
+  const model = settings.aiModels[provider]?.trim() || info.defaultModel;
+  if (!model) throw new Error(`Enter a model name for ${info.name} in Settings.`);
 
   const text = [
     req.prompt?.trim() ? `User note: ${req.prompt.trim()}` : 'Please review this chart.',
     req.context ? `\nThe app's own rule-based analysis of the currently loaded instrument (may or may not match the screenshot):\n${req.context}` : '',
   ].join('\n');
 
+  if (provider === 'anthropic') return reviewWithClaude(apiKey!, model, req, text);
+
+  const baseUrl = baseUrlFor(provider, settings.aiBaseUrl);
+  const payload = buildChatBody({ model, system: SYSTEM, text, mediaType: req.mediaType, imageBase64: req.imageBase64 });
+  const body = await request(`${baseUrl}/chat/completions`, { method: 'POST', headers: headers(apiKey), body: JSON.stringify(payload) }, info.name);
+  const r = parseChatResponse(body, model);
+  if (r.refused) return { text: r.text || 'The model declined to review this image.', model: r.model, provider: info.name, refused: true };
+  return { text: (r.text || 'No review text was returned.') + (r.truncated ? CUT_OFF : ''), model: r.model, provider: info.name, refused: false };
+}
+
+async function reviewWithClaude(apiKey: string, model: string, req: ChartReviewRequest, text: string): Promise<ChartReviewResult> {
+  const label = AI_PROVIDERS.anthropic.name;
+  const client = new Anthropic({ apiKey });
   try {
     const response = await client.beta.messages.create({
       model,
@@ -56,22 +87,92 @@ export async function reviewChart(req: ChartReviewRequest): Promise<ChartReviewR
     });
 
     if (response.stop_reason === 'refusal') {
-      return { text: 'The model declined to review this image. Try a cleaner chart screenshot.', model: response.model, refused: true };
+      return { text: 'The model declined to review this image. Try a cleaner chart screenshot.', model: response.model, provider: label, refused: true };
     }
     const out = response.content
       .filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
       .map((b) => b.text)
       .join('\n')
       .trim();
-    const truncated = response.stop_reason === 'max_tokens' ? '\n\n_(Response was cut off at the output limit.)_' : '';
-    return { text: (out || 'No review text was returned.') + truncated, model: response.model, refused: false };
+    const truncated = response.stop_reason === 'max_tokens' ? CUT_OFF : '';
+    return { text: (out || 'No review text was returned.') + truncated, model: response.model, provider: label, refused: false };
   } catch (error) {
-    if (error instanceof Anthropic.AuthenticationError) throw new Error('The Anthropic API key was rejected. Check it in Settings.');
-    if (error instanceof Anthropic.PermissionDeniedError) throw new Error('This API key cannot use the selected model.');
-    if (error instanceof Anthropic.RateLimitError) throw new Error('Rate limited by the Anthropic API — try again shortly.');
-    if (error instanceof Anthropic.BadRequestError) throw new Error(`Request rejected: ${error.message}`);
-    if (error instanceof Anthropic.APIError) throw new Error(`Anthropic API error ${error.status ?? ''}: ${error.message}`);
-    if (error instanceof Anthropic.APIConnectionError) throw new Error('Could not reach the Anthropic API. Check your connection.');
-    throw error;
+    throw claudeError(error);
+  }
+}
+
+function claudeError(error: unknown): Error {
+  if (error instanceof Anthropic.AuthenticationError) return new Error('The Anthropic API key was rejected. Check it in Settings.');
+  if (error instanceof Anthropic.PermissionDeniedError) return new Error('This API key cannot use the selected model.');
+  if (error instanceof Anthropic.NotFoundError) return new Error('Anthropic could not find that model. Check the model name in Settings.');
+  if (error instanceof Anthropic.RateLimitError) return new Error('Rate limited by the Anthropic API — try again shortly.');
+  if (error instanceof Anthropic.BadRequestError) return new Error(`Request rejected: ${error.message}`);
+  if (error instanceof Anthropic.APIError) return new Error(`Anthropic API error ${error.status ?? ''}: ${error.message}`);
+  if (error instanceof Anthropic.APIConnectionError) return new Error('Could not reach the Anthropic API. Check your connection.');
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function baseUrlFor(provider: AiProviderId, custom?: string): string {
+  if (provider === 'custom') {
+    if (!custom?.trim()) throw new Error('Enter the server base URL for the OpenAI-compatible provider in Settings.');
+    return normalizeBaseUrl(custom);
+  }
+  return AI_PROVIDERS[provider].baseUrl!;
+}
+
+function headers(apiKey: string | undefined): Record<string, string> {
+  const h: Record<string, string> = { 'Content-Type': 'application/json', 'X-Title': 'TrendLens' };
+  if (apiKey) h.Authorization = `Bearer ${apiKey}`;
+  return h;
+}
+
+/** fetch with a timeout; turns HTTP and network failures into plain-language errors. */
+async function request(url: string, init: RequestInit, label: string): Promise<unknown> {
+  let res: Response;
+  try {
+    res = await fetch(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  } catch (e) {
+    if ((e as Error).name === 'TimeoutError') throw new Error(`${label} did not answer within ${TIMEOUT_MS / 1000} s.`);
+    throw new Error(`Could not reach ${label}. Check your connection and, for a custom server, the base URL.`);
+  }
+  const raw = await res.text();
+  let body: unknown;
+  try {
+    body = raw ? JSON.parse(raw) : {};
+  } catch {
+    body = undefined;
+  }
+  if (!res.ok) {
+    const detail = (body !== undefined ? apiErrorMessage(body) : undefined) ?? raw.slice(0, 200).trim();
+    throw new Error(describeHttpError(res.status, label, detail || undefined));
+  }
+  if (body === undefined) throw new Error(`${label} returned an unreadable response.`);
+  return body;
+}
+
+/** Checks a key (typed or stored) by listing the provider's models. */
+export async function testAi(req: AiTestRequest): Promise<AiTestResult> {
+  const info = AI_PROVIDERS[req.provider];
+  if (!info) return { ok: false, models: [], error: 'Unknown AI provider.' };
+  const apiKey = req.key?.trim() || getApiKey(req.provider);
+  if (!apiKey && !info.keyOptional) return { ok: false, models: [], error: `Enter a ${info.name} API key first.` };
+  try {
+    if (req.provider === 'anthropic') {
+      const client = new Anthropic({ apiKey: apiKey!, timeout: 30_000 });
+      const models: string[] = [];
+      try {
+        for await (const m of client.models.list()) models.push(m.id);
+      } catch (error) {
+        throw claudeError(error);
+      }
+      return { ok: true, models };
+    }
+    const base = baseUrlFor(req.provider, req.baseUrl ?? getSettings().aiBaseUrl);
+    // OpenRouter's model list is public, so check the key on its own endpoint first.
+    if (req.provider === 'openrouter') await request(`${base}/key`, { headers: headers(apiKey) }, info.name);
+    const body = await request(`${base}/models`, { headers: headers(apiKey) }, info.name);
+    return { ok: true, models: chatModelIds(body) };
+  } catch (e) {
+    return { ok: false, models: [], error: (e as Error).message };
   }
 }
