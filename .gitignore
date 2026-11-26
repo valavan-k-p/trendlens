@@ -1,0 +1,7 @@
+node_modules/
+out/
+release/
+*.log
+research/site-bundle/
+research/*.evidence.json
+research/bundle-strings.txt
