@@ -13,8 +13,8 @@ No login: it opens straight to the analyzer.
 
 **Installed app** (after `npm run dist`):
 
-- `release\TrendLens Setup 1.0.0.exe` — installer (Start menu + desktop shortcut), or
-- `release\TrendLens-Portable-1.0.0.exe` — single portable exe, no install.
+- `release\TrendLens Setup 1.1.0.exe` — installer (Start menu + desktop shortcut), or
+- `release\TrendLens-Portable-1.1.0.exe` — single portable exe, no install.
 
 **From source** (Node.js 22.12+):
 
