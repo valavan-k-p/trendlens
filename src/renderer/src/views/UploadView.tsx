@@ -148,6 +148,11 @@ export function UploadView({ hasApiKey, currentReport, onOpenSettings, notify }:
               </button>
             )}
           </h4>
+          {result?.note && (
+            <div className="tone-warn" style={{ fontSize: 12, marginBottom: 8 }}>
+              {result.note}
+            </div>
+          )}
           {result ? <Markdown text={result.text} /> : <div style={{ color: 'var(--muted)' }}>The structured review appears here.</div>}
         </div>
       </div>

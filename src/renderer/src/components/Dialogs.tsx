@@ -52,6 +52,41 @@ export function SettingsDialog({ settings, onClose, onSaved }: { settings: Setti
   const [us, setUs] = useState(toText(settings.usWatchlist));
   const [india, setIndia] = useState(toText(settings.indiaWatchlist));
   const [err, setErr] = useState<string | null>(null);
+  const [optProvider, setOptProvider] = useState(settings.optionProvider);
+  const [upstoxToken, setUpstoxToken] = useState('');
+  const [dhanClient, setDhanClient] = useState('');
+  const [dhanToken, setDhanToken] = useState('');
+  const [rate, setRate] = useState(String(settings.optionRiskFreeRate));
+  const [divYield, setDivYield] = useState(String(settings.optionDividendYield));
+  const [snapSec, setSnapSec] = useState(settings.optionSnapshotSeconds);
+  const [optTest, setOptTest] = useState<{ provider: string; ok: boolean; text: string } | null>(null);
+  const [optTesting, setOptTesting] = useState(false);
+  const saveOptionCreds = async () => {
+    let s: Settings | undefined;
+    if (upstoxToken.trim()) s = await window.trendlens.setOptionCredentials({ provider: 'upstox', token: upstoxToken.trim() });
+    if (dhanClient.trim() || dhanToken.trim())
+      s = await window.trendlens.setOptionCredentials({ provider: 'dhan', clientId: dhanClient.trim() || undefined, token: dhanToken.trim() || undefined });
+    return s;
+  };
+  const testOptions = async (provider: 'upstox' | 'dhan') => {
+    setOptTesting(true);
+    setOptTest(null);
+    try {
+      const s = await saveOptionCreds();
+      if (s) onSaved(s);
+      setUpstoxToken('');
+      setDhanClient('');
+      setDhanToken('');
+      const r = await window.trendlens.testOptionProvider(provider);
+      setOptTest({ provider, ok: r.ok, text: r.message });
+    } catch (e) {
+      setOptTest({ provider, ok: false, text: (e as Error).message });
+    } finally {
+      setOptTesting(false);
+    }
+  };
+  const removeOption = async (provider: 'upstox' | 'dhan') =>
+    onSaved(await window.trendlens.setOptionCredentials(provider === 'upstox' ? { provider, token: null } : { provider, token: null, clientId: null }));
   const [source, setSource] = useState<Settings['dataSource']>(settings.dataSource);
   const [mt4, setMt4] = useState<Mt4Status | null>(null);
   const [folder, setFolder] = useState(settings.mt4Folder);
@@ -97,11 +132,16 @@ export function SettingsDialog({ settings, onClose, onSaved }: { settings: Setti
         aiProvider,
         aiModels: Object.fromEntries(Object.entries(aiModels).map(([p, m]) => [p, (m ?? '').trim()]).filter(([, m]) => m)),
         aiBaseUrl: baseUrl.trim() || undefined,
+        optionProvider: optProvider,
+        optionRiskFreeRate: Number.isFinite(Number(rate)) ? Math.max(0, Math.min(25, Number(rate))) : settings.optionRiskFreeRate,
+        optionDividendYield: Number.isFinite(Number(divYield)) ? Math.max(0, Math.min(15, Number(divYield))) : settings.optionDividendYield,
+        optionSnapshotSeconds: snapSec,
         tickerTape: fromText(tape),
         usWatchlist: fromText(us),
         indiaWatchlist: fromText(india),
       });
       if (key.trim()) s = await window.trendlens.setApiKey(aiProvider, key.trim());
+      s = (await saveOptionCreds()) ?? s;
       onSaved(s);
       onClose();
     } catch (e) {
@@ -216,6 +256,77 @@ export function SettingsDialog({ settings, onClose, onSaved }: { settings: Setti
       <div className="field">
         <label>Indian market list</label>
         <textarea rows={2} value={india} onChange={(e) => setIndia(e.target.value)} />
+      </div>
+
+      <h3>Option chain data</h3>
+      <div className="field">
+        <label>NSE / BSE provider</label>
+        <select className="input" value={optProvider} onChange={(e) => setOptProvider(e.target.value as 'upstox' | 'dhan')}>
+          <option value="upstox">Upstox (free Analytics Token)</option>
+          <option value="dhan">Dhan (Data API subscription)</option>
+        </select>
+      </div>
+      <div className="field">
+        <label>Upstox Analytics Token</label>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input className="input" type="password" placeholder={settings.optionKeys.upstox ? '•••••• saved (paste a new token to replace)' : 'paste the token'} value={upstoxToken} onChange={(e) => setUpstoxToken(e.target.value)} />
+          <button className="btn btn-sm" disabled={optTesting || (!upstoxToken.trim() && !settings.optionKeys.upstox)} onClick={() => void testOptions('upstox')}>
+            Test
+          </button>
+          {settings.optionKeys.upstox && (
+            <button className="btn btn-sm btn-danger" onClick={() => void removeOption('upstox')}>
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="field">
+        <label>Dhan client id</label>
+        <input className="input" type="password" placeholder={settings.optionKeys.dhan ? '•••••• saved' : 'e.g. 1000000001'} value={dhanClient} onChange={(e) => setDhanClient(e.target.value)} />
+      </div>
+      <div className="field">
+        <label>Dhan access token</label>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input className="input" type="password" placeholder={settings.optionKeys.dhan ? '•••••• saved (expires every 24 h)' : 'paste the access token'} value={dhanToken} onChange={(e) => setDhanToken(e.target.value)} />
+          <button className="btn btn-sm" disabled={optTesting || ((!dhanToken.trim() || !dhanClient.trim()) && !settings.optionKeys.dhan)} onClick={() => void testOptions('dhan')}>
+            Test
+          </button>
+          {settings.optionKeys.dhan && (
+            <button className="btn btn-sm btn-danger" onClick={() => void removeOption('dhan')}>
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
+      {optTest && <div className={optTest.ok ? 'tone-bull' : 'tone-bear'} style={{ fontSize: 12, marginBottom: 6 }}>{optTest.text}</div>}
+      <div className="field">
+        <label>Risk-free rate (%)</label>
+        <input className="input" value={rate} onChange={(e) => setRate(e.target.value)} />
+      </div>
+      <div className="field">
+        <label>Dividend yield (%)</label>
+        <input className="input" value={divYield} onChange={(e) => setDivYield(e.target.value)} />
+      </div>
+      <div className="field">
+        <label>Save snapshots</label>
+        <select className="input" value={snapSec} onChange={(e) => setSnapSec(Number(e.target.value))}>
+          <option value={0}>Off</option>
+          <option value={60}>Every minute</option>
+          <option value={300}>Every 5 minutes</option>
+          <option value={900}>Every 15 minutes</option>
+        </select>
+      </div>
+      <div style={{ color: 'var(--faint)', fontSize: 12 }}>
+        Upstox: Developer Apps → Analytics → Generate Token (free, read-only, valid one year; NSE and BSE). Dhan: needs the Data API plan; tokens last 24 hours; also serves MCX option chains, which
+        Upstox does not offer. Credentials are encrypted with Windows DPAPI and used only by the app's background process. The rate is used for calculated Greeks; the dividend yield only when put-call parity
+        cannot be measured.{' '}
+        <a href="#" onClick={(e) => (e.preventDefault(), void window.trendlens.openExternal('https://upstox.com/developer/api-documentation/analytics-token/'))}>
+          Upstox Analytics Token
+        </a>{' '}
+        ·{' '}
+        <a href="#" onClick={(e) => (e.preventDefault(), void window.trendlens.openExternal('https://dhanhq.co/docs/v2/'))}>
+          Dhan API docs
+        </a>
       </div>
 
       <h3>AI chart review (optional)</h3>

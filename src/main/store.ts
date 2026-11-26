@@ -3,7 +3,7 @@ import { app, safeStorage } from 'electron';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AI_PROVIDER_IDS, type AiProviderId } from '@core/ai/providers';
-import type { HistoryEntry, Settings } from '../shared/api';
+import type { HistoryEntry, OptionDataProvider, Settings } from '../shared/api';
 
 const dir = () => app.getPath('userData');
 const file = (name: string) => join(dir(), name);
@@ -26,7 +26,7 @@ function writeJson(name: string, value: unknown): void {
   renameSync(`${p}.tmp`, p);
 }
 
-export const DEFAULT_SETTINGS: Omit<Settings, 'hasApiKey' | 'savedKeys'> = {
+export const DEFAULT_SETTINGS: Omit<Settings, 'hasApiKey' | 'savedKeys' | 'optionKeys'> = {
   theme: 'dark',
   defaultSymbol: { symbol: 'NIFTY', name: 'NIFTY 50 index', exchange: 'MT4', assetClass: 'index', provider: 'mt4' },
   defaultTimeframe: '15m',
@@ -73,11 +73,17 @@ export const DEFAULT_SETTINGS: Omit<Settings, 'hasApiKey' | 'savedKeys'> = {
   lowerPane: 'rsi',
   aiProvider: 'anthropic',
   aiModels: {},
+  optionProvider: 'upstox',
+  optionRiskFreeRate: 6.5,
+  optionDividendYield: 0,
+  optionSnapshotSeconds: 60,
 };
 
-interface StoredSettings extends Partial<Omit<Settings, 'hasApiKey' | 'savedKeys'>> {
+interface StoredSettings extends Partial<Omit<Settings, 'hasApiKey' | 'savedKeys' | 'optionKeys'>> {
   /** Encrypted keys per AI provider. */
   encryptedApiKeys?: Partial<Record<AiProviderId, string>>;
+  /** Other encrypted credentials by name (e.g. "upstox.token", "dhan.token", "dhan.clientId"). */
+  encryptedSecrets?: Record<string, string>;
   /** Legacy (v1.0): a single Anthropic key and model. */
   encryptedApiKey?: string;
   aiModel?: string;
@@ -98,7 +104,7 @@ function readStored(): StoredSettings {
 }
 
 export function getSettings(): Settings {
-  const { encryptedApiKeys = {}, ...rest } = readStored();
+  const { encryptedApiKeys = {}, encryptedSecrets = {}, ...rest } = readStored();
   const s = {
     ...DEFAULT_SETTINGS,
     ...rest,
@@ -108,12 +114,16 @@ export function getSettings(): Settings {
   if (!AI_PROVIDER_IDS.includes(s.aiProvider)) s.aiProvider = 'anthropic';
   const savedKeys = AI_PROVIDER_IDS.filter((p) => !!encryptedApiKeys[p]);
   const ready = s.aiProvider === 'custom' ? !!s.aiBaseUrl : savedKeys.includes(s.aiProvider);
-  return { ...s, hasApiKey: ready, savedKeys };
+  const optionKeys: Record<OptionDataProvider, boolean> = {
+    upstox: !!encryptedSecrets['upstox.token'],
+    dhan: !!encryptedSecrets['dhan.token'] && !!encryptedSecrets['dhan.clientId'],
+  };
+  return { ...s, hasApiKey: ready, savedKeys, optionKeys };
 }
 
 export function saveSettings(patch: Partial<Settings>): Settings {
   const stored = readStored();
-  const { hasApiKey: _a, savedKeys: _b, ...clean } = patch;
+  const { hasApiKey: _a, savedKeys: _b, optionKeys: _c, ...clean } = patch;
   writeJson('settings.json', { ...stored, ...clean });
   return getSettings();
 }
@@ -136,6 +146,28 @@ export function setApiKey(provider: AiProviderId, key: string | null): Settings 
 
 export function getApiKey(provider: AiProviderId): string | undefined {
   const enc = readStored().encryptedApiKeys?.[provider];
+  if (!enc) return undefined;
+  try {
+    return safeStorage.decryptString(Buffer.from(enc, 'base64'));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Stores a named credential encrypted with DPAPI; null or empty removes it. */
+export function setSecret(name: string, value: string | null): void {
+  const stored = readStored();
+  const secrets = { ...(stored.encryptedSecrets ?? {}) };
+  if (value && value.trim()) {
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('OS encryption is unavailable; the credential was not saved.');
+    secrets[name] = safeStorage.encryptString(value.trim()).toString('base64');
+  } else delete secrets[name];
+  stored.encryptedSecrets = secrets;
+  writeJson('settings.json', stored);
+}
+
+export function getSecret(name: string): string | undefined {
+  const enc = readStored().encryptedSecrets?.[name];
   if (!enc) return undefined;
   try {
     return safeStorage.decryptString(Buffer.from(enc, 'base64'));

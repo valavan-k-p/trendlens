@@ -6,8 +6,11 @@ import {
   chatModelIds,
   describeHttpError,
   detectProvider,
+  isTransientStatus,
+  modelsToTry,
   normalizeBaseUrl,
   parseChatResponse,
+  retryDelayMs,
 } from '@core/ai/providers';
 
 describe('AI provider key detection', () => {
@@ -91,5 +94,29 @@ describe('OpenAI-compatible responses', () => {
   it('lists chat models from a /models response, dropping non-chat ones', () => {
     const ids = chatModelIds({ data: [{ id: 'gpt-5' }, { id: 'text-embedding-3-small' }, { id: 'whisper-1' }, { id: 'models/gemini-2.5-flash' }, { id: 'gpt-5' }] });
     expect(ids).toEqual(['gemini-2.5-flash', 'gpt-5']);
+    // Gemini's list also has live-audio, speech and image-generation models that cannot review a chart.
+    const gem = chatModelIds({
+      data: ['models/gemini-3.8-flash', 'models/gemini-3.8-live', 'models/gemini-3.8-flash-tts', 'models/gemini-3.1-flash-image', 'models/gemini-nano-banana-2.1', 'models/gemini-3.5-flash-lite'].map((id) => ({ id })),
+    });
+    expect(gem).toEqual(['gemini-3.5-flash-lite', 'gemini-3.8-flash']);
+  });
+
+  it('retries busy and rate-limited answers only', () => {
+    expect([429, 500, 502, 503, 504].every(isTransientStatus)).toBe(true);
+    expect([400, 401, 403, 404].some(isTransientStatus)).toBe(false);
+    expect([retryDelayMs(0), retryDelayMs(1)]).toEqual([2000, 5000]);
+  });
+
+  it('falls back to other image-capable Gemini models only from the default', () => {
+    expect(modelsToTry(AI_PROVIDERS.gemini, 'gemini-3.8-flash')).toEqual(['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']);
+    expect(modelsToTry(AI_PROVIDERS.gemini, 'gemini-3.6-flash')).toEqual(['gemini-3.6-flash', 'gemini-3.5-flash-lite']);
+    // A model the user chose on purpose is never swapped.
+    expect(modelsToTry(AI_PROVIDERS.gemini, 'gemini-4-neon')).toEqual(['gemini-4-neon']);
+    expect(modelsToTry(AI_PROVIDERS.openai, 'gpt-5')).toEqual(['gpt-5']);
+  });
+
+  it('defaults Gemini to the current stable Flash model', () => {
+    expect(AI_PROVIDERS.gemini.defaultModel).toBe('gemini-3.8-flash');
+    expect(detectProvider('AIzaSyD-ExampleExampleExampleExample12')).toBe('gemini');
   });
 });

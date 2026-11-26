@@ -36,12 +36,13 @@ npm start
 | Modules | Market structure (HH/HL, BOS, CHoCH), trend strength matrix, momentum + pulse, volatility regime, liquidity participation, price behaviour (S/R, round numbers, break & retest), smart money (sweeps, traps, order blocks, FVGs, equal highs/lows, A/D), multi-timeframe alignment, risk control |
 | Chart overlays | Key levels, order-block / FVG zones, structure and sweep/trap markers |
 | Markets | Scrolling global ticker, NASDAQ & Indian live price tables, NIFTY / BANK NIFTY index bias |
+| Option Chain | NSE/BSE/MCX option chains (calls · strike · puts, 10 columns a side), ATM/ITM/OTM, highest OI and OI additions, sorting and filters; 14-figure dashboard (PCR, Max Pain, …); OI analysis with build-up, support/resistance, concentration and strike charts; Greeks and IV (provider or Black-Scholes/Black-76), IV smile, skew, IV rank; Max Pain chart; saved snapshots with comparisons. See `docs/OPTIONS.md` |
 | AI chart review | Upload, paste or drop a chart screenshot for a structured AI review with your own key: Claude, OpenAI, Google Gemini, OpenRouter, Groq or any OpenAI-compatible server (DeepSeek, Ollama, LM Studio) |
 | History | Save reports locally, revisit, export as Markdown |
 | Data | MetaTrader 4 history (primary: Indian indices, MCX, options), Yahoo Finance, Binance, CSV import |
 
 Keyboard: `Ctrl+K` search · `F5` analyse · `Ctrl+O` import CSV · `Ctrl+E` export ·
-`Ctrl+1…4` switch views · `Ctrl+,` settings.
+`Ctrl+1…5` switch views (5 = Option Chain) · `Ctrl+,` settings.
 
 ## Project layout
 
@@ -49,7 +50,9 @@ Keyboard: `Ctrl+K` search · `F5` analyse · `Ctrl+O` import CSV · `Ctrl+E` exp
 src/core/        pure TypeScript, fully unit-tested
   indicators/    SMA, EMA, RSI, MACD, ATR, ADX, Bollinger, Stochastic, OBV, MFI, CMF, VWAP, Supertrend
   analysis/      structure, levels, smart money, scoring engine → AnalysisReport
-  data/          Yahoo + Binance parsers, CSV import, resampling
+  data/          Yahoo + Binance + MT4 parsers, CSV import, resampling
+  options/       option chain model, PCR, Max Pain, OI analysis, Greeks/IV, snapshots,
+                 Upstox / Dhan / CSV parsers
 src/main/        Electron main process: window, menu, network, settings/history, AI review
 src/preload/     typed IPC bridge
 src/renderer/    React UI (chart, report, markets, AI review, history, settings)
@@ -77,6 +80,12 @@ docs/            PLAN.md, ANALYSIS.md (every rule and threshold)
     timeframe that has more history (e.g. 15m from 5m).
   - Too little history? Open the chart in MT4 and press Home to download more.
   - Bar times are the broker's server time; tick volume is used as volume.
+- **Option chains.** NSE and BSE come from Upstox's documented option-chain API with your free
+  Upstox Analytics Token (read-only, valid one year); MCX comes from Dhan (Data API plan, daily
+  token). Settings → Option chain data stores them encrypted. Without a token, the Option Chain
+  tab says what is missing and accepts a CSV (e.g. the NSE website's download). Underlyings, lot
+  sizes and expiries come from the providers' public instrument lists. Snapshots are saved
+  locally for history. Details and assumptions: `docs/OPTIONS.md`.
 - Yahoo Finance public chart/search endpoints: no key; unofficial, intended here for
   personal use; quotes for some exchanges are delayed. Indices and forex report no
   volume, so volume modules are skipped for them.

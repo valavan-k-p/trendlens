@@ -11,8 +11,11 @@ import {
   buildChatBody,
   chatModelIds,
   describeHttpError,
+  isTransientStatus,
+  modelsToTry,
   normalizeBaseUrl,
   parseChatResponse,
+  retryDelayMs,
   type AiProviderId,
 } from '@core/ai/providers';
 import type { AiTestRequest, AiTestResult, ChartReviewRequest, ChartReviewResult } from '../shared/api';
@@ -56,11 +59,41 @@ export async function reviewChart(req: ChartReviewRequest): Promise<ChartReviewR
   if (provider === 'anthropic') return reviewWithClaude(apiKey!, model, req, text);
 
   const baseUrl = baseUrlFor(provider, settings.aiBaseUrl);
-  const payload = buildChatBody({ model, system: SYSTEM, text, mediaType: req.mediaType, imageBase64: req.imageBase64 });
-  const body = await request(`${baseUrl}/chat/completions`, { method: 'POST', headers: headers(apiKey), body: JSON.stringify(payload) }, info.name);
-  const r = parseChatResponse(body, model);
-  if (r.refused) return { text: r.text || 'The model declined to review this image.', model: r.model, provider: info.name, refused: true };
-  return { text: (r.text || 'No review text was returned.') + (r.truncated ? CUT_OFF : ''), model: r.model, provider: info.name, refused: false };
+  const candidates = modelsToTry(info, model);
+  const busy: string[] = [];
+  let last: unknown;
+  for (const m of candidates) {
+    const payload = JSON.stringify(buildChatBody({ model: m, system: SYSTEM, text, mediaType: req.mediaType, imageBase64: req.imageBase64 }));
+    // Two tries per model (one retry after a short wait); then move on to the next model.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const body = await request(`${baseUrl}/chat/completions`, { method: 'POST', headers: headers(apiKey), body: payload }, info.name);
+        const r = parseChatResponse(body, m);
+        const note = busy.length ? `${busy.join(' and ')} ${busy.length > 1 ? 'were' : 'was'} busy, so ${m} reviewed this chart.` : attempt ? `${m} was busy at first; it answered on a retry.` : undefined;
+        if (r.refused) return { text: r.text || 'The model declined to review this image.', model: r.model, provider: info.name, refused: true, note };
+        return { text: (r.text || 'No review text was returned.') + (r.truncated ? CUT_OFF : ''), model: r.model, provider: info.name, refused: false, note };
+      } catch (e) {
+        last = e;
+        const status = e instanceof HttpError ? e.status : undefined;
+        if (status === undefined || !isTransientStatus(status)) throw e;
+        if (attempt === 0) await new Promise((res) => setTimeout(res, retryDelayMs(attempt)));
+      }
+    }
+    busy.push(m);
+  }
+  if (candidates.length > 1 && last instanceof Error)
+    throw new Error(`${info.name} is busy right now: ${candidates.join(', ')} all returned “try again later”. This is on Google's side and usually passes within minutes. ${last.message}`);
+  throw last;
+}
+
+/** An HTTP failure from a provider, keeping the status so busy/rate-limit errors can be retried. */
+class HttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
 }
 
 async function reviewWithClaude(apiKey: string, model: string, req: ChartReviewRequest, text: string): Promise<ChartReviewResult> {
@@ -144,7 +177,7 @@ async function request(url: string, init: RequestInit, label: string): Promise<u
   }
   if (!res.ok) {
     const detail = (body !== undefined ? apiErrorMessage(body) : undefined) ?? raw.slice(0, 200).trim();
-    throw new Error(describeHttpError(res.status, label, detail || undefined));
+    throw new HttpError(describeHttpError(res.status, label, detail || undefined), res.status);
   }
   if (body === undefined) throw new Error(`${label} returned an unreadable response.`);
   return body;

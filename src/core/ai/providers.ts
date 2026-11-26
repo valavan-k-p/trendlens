@@ -21,6 +21,8 @@ export interface AiProviderInfo {
   /** Local servers such as Ollama need no key. */
   keyOptional?: boolean;
   note?: string;
+  /** Image-capable models tried, in order, when the default model is overloaded or rate-limited. */
+  fallbackModels?: string[];
 }
 
 export const AI_PROVIDERS: Record<AiProviderId, AiProviderInfo> = {
@@ -46,7 +48,10 @@ export const AI_PROVIDERS: Record<AiProviderId, AiProviderInfo> = {
     name: 'Google Gemini',
     label: 'Google Gemini',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    defaultModel: 'gemini-2.5-flash',
+    // Stable since Sep 2026 and accepts images; gemini-2.5-flash is deprecated (rerouted from 1 Dec 2026).
+    defaultModel: 'gemini-3.8-flash',
+    // Stable Gemini models that accept images, used only while the chosen model is busy.
+    fallbackModels: ['gemini-3.6-flash', 'gemini-3.5-flash-lite'],
     keyHint: 'AIza…',
     keysUrl: 'https://aistudio.google.com/apikey',
     note: 'Google AI Studio keys include a free usage tier.',
@@ -182,9 +187,29 @@ export function describeHttpError(status: number, providerLabel: string, detail?
   return `${providerLabel} rejected the request (HTTP ${status})${d}.`;
 }
 
+/** HTTP statuses worth retrying: overloaded / unavailable / gateway errors and rate limits. */
+export function isTransientStatus(status: number): boolean {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+/**
+ * Models to try for one review: the chosen model first, then the provider's fallbacks. Fallbacks
+ * apply only when the chosen model is the provider default or itself a fallback, so a model the
+ * user picked on purpose is never silently swapped for another.
+ */
+export function modelsToTry(info: AiProviderInfo, model: string): string[] {
+  const fb = info.fallbackModels ?? [];
+  if (model !== info.defaultModel && !fb.includes(model)) return [model];
+  return [model, ...fb.filter((m) => m !== model)];
+}
+
+/** Wait before retry n (0-based): 2 s, then 5 s. */
+export const retryDelayMs = (attempt: number) => (attempt === 0 ? 2000 : 5000);
+
 /** Model ids from a /models listing, without embedding, audio and image-generation models. */
 export function chatModelIds(body: unknown): string[] {
   const data = (body as { data?: { id?: string }[] })?.data ?? [];
-  const skip = /embed|tts|whisper|dall-e|audio|realtime|transcribe|moderation|image-gen|imagen|search|davinci|babbage|aqa|veo/i;
+  // Drops models that cannot answer a chat request about an image (embeddings, speech, live audio, image/video generation).
+  const skip = /embed|tts|whisper|dall-e|audio|realtime|transcribe|moderation|image-gen|imagen|-image|banana|-live|search|davinci|babbage|aqa|veo/i;
   return [...new Set(data.map((m) => String(m.id ?? '').replace(/^models\//, '')).filter((id) => id && !skip.test(id)))].sort();
 }

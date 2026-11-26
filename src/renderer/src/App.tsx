@@ -14,9 +14,10 @@ import { reportToMarkdown } from './lib/report';
 import { runAnalysis } from './lib/runAnalysis';
 import { HistoryView } from './views/HistoryView';
 import { MarketsView } from './views/MarketsView';
+import { OptionsView } from './views/OptionsView';
 import { UploadView } from './views/UploadView';
 
-type View = 'analyzer' | 'markets' | 'upload' | 'history';
+type View = 'analyzer' | 'markets' | 'options' | 'upload' | 'history';
 const STAGES = ['Symbol', 'Timeframe', 'Context', 'Structure', 'Momentum', 'Risk view'];
 const INTRADAY: Timeframe[] = ['1m', '5m', '15m', '30m', '1h', '4h'];
 
@@ -265,6 +266,7 @@ export function App() {
     'view:markets': () => setView('markets'),
     'view:upload': () => setView('upload'),
     'view:history': () => setView('history'),
+    'view:options': () => setView('options'),
     search: () => {
       setView('analyzer');
       setTimeout(() => searchRef.current?.focus(), 0);
@@ -303,6 +305,7 @@ export function App() {
             [
               ['analyzer', 'Analyzer'],
               ['markets', 'Markets'],
+              ['options', 'Option Chain'],
               ['upload', 'AI Chart Review'],
               ['history', 'History'],
             ] as [View, string][]
@@ -470,6 +473,10 @@ export function App() {
         {view === 'markets' && (
           <MarketsView us={settings.usWatchlist} india={settings.indiaWatchlist} global={settings.tickerTape} quotes={quotes} onOpen={openSymbol} lastUpdate={quotesAt} mt4Symbols={mt4Symbols} />
         )}
+        {/* Kept mounted so the selection, sorting and scroll survive switching tabs; it pauses refreshing while hidden. */}
+        <div className="view-host" style={{ display: view === 'options' ? 'block' : 'none' }}>
+          <OptionsView settings={settings} active={view === 'options'} notify={notify} onOpenSettings={() => setDialog('settings')} />
+        </div>
         {view === 'upload' && <UploadView hasApiKey={settings.hasApiKey} currentReport={report} onOpenSettings={() => setDialog('settings')} notify={notify} />}
         {view === 'history' && (
           <HistoryView

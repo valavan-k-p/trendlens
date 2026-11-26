@@ -3,12 +3,15 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { AiProviderId } from '@core/ai/providers';
 import { parseCsv } from '@core/data/csv';
+import { parseOptionChainCsv } from '@core/options/providers/csv';
+import type { OptionExchange } from '@core/options/types';
 import * as market from './market';
 import * as store from './store';
 import { reviewChart, testAi } from './ai';
 import * as mt4 from './mt4';
 import { installFeed } from './mt4install';
-import type { Settings, WatchItem } from '../shared/api';
+import * as options from './options/service';
+import type { OptionCredentials, OptionDataProvider, Settings, WatchItem } from '../shared/api';
 
 let win: BrowserWindow | null = null;
 
@@ -85,6 +88,7 @@ function buildMenu(): void {
         { label: 'Markets', accelerator: 'CmdOrCtrl+2', click: () => send('view:markets') },
         { label: 'AI Chart Review', accelerator: 'CmdOrCtrl+3', click: () => send('view:upload') },
         { label: 'History', accelerator: 'CmdOrCtrl+4', click: () => send('view:history') },
+        { label: 'Option Chain', accelerator: 'CmdOrCtrl+5', click: () => send('view:options') },
         { type: 'separator' },
         { label: 'Search Symbol', accelerator: 'CmdOrCtrl+K', click: () => send('search') },
         { label: 'Analyse', accelerator: 'F5', click: () => send('analyse') },
@@ -109,7 +113,7 @@ function buildMenu(): void {
               title: 'About TrendLens',
               message: `TrendLens ${app.getVersion()}`,
               detail:
-                'Personal market-structure analysis workstation.\n\nData: Yahoo Finance public endpoints and Binance public market data. Charts: TradingView Lightweight Charts (Apache-2.0).\n\nOutputs are educational and informational only — not investment advice.',
+                'Personal market-structure analysis workstation.\n\nData: MetaTrader 4, Yahoo Finance public endpoints, Binance public market data, and option chains from the Upstox / Dhan APIs with your own credentials. Charts: TradingView Lightweight Charts (Apache-2.0).\n\nOutputs are educational and informational only — not investment advice.',
             }),
         },
       ],
@@ -159,6 +163,37 @@ function registerIpc(): void {
   ipcMain.handle('history:delete', (_e, id: string) => store.deleteHistory(id));
   ipcMain.handle('ai:review', (_e, req) => reviewChart(req));
   ipcMain.handle('ai:test', (_e, req) => testAi(req));
+  const exchangeOk = (x: unknown): x is OptionExchange => x === 'NSE' || x === 'BSE' || x === 'MCX';
+  ipcMain.handle('options:catalog', (_e, exchange: OptionExchange, refresh?: boolean) => {
+    if (!exchangeOk(exchange)) throw new Error('Unknown exchange.');
+    return options.catalog(exchange, !!refresh);
+  });
+  ipcMain.handle('options:chain', (_e, req) => {
+    if (!exchangeOk(req?.exchange)) throw new Error('Unknown exchange.');
+    return options.chain(req);
+  });
+  ipcMain.handle('options:credentials', (_e, c: OptionCredentials) => {
+    if (c?.provider !== 'upstox' && c?.provider !== 'dhan') throw new Error('Unknown option data provider.');
+    if (c.token !== undefined) store.setSecret(`${c.provider}.token`, c.token);
+    if (c.provider === 'dhan' && c.clientId !== undefined) store.setSecret('dhan.clientId', c.clientId);
+    return resolveSettings(store.getSettings());
+  });
+  ipcMain.handle('options:test', (_e, provider: OptionDataProvider) => options.testProvider(provider));
+  ipcMain.handle('options:importCsv', async () => {
+    const r = await dialog.showOpenDialog(win!, { title: 'Import option-chain CSV', filters: [{ name: 'CSV', extensions: ['csv', 'txt'] }], properties: ['openFile'] });
+    if (r.canceled || !r.filePaths[0]) return null;
+    const p = r.filePaths[0];
+    return { fileName: basename(p), parsed: parseOptionChainCsv(await readFile(p, 'utf8'), basename(p)) };
+  });
+  ipcMain.handle('options:snapshots', (_e, exchange: OptionExchange, symbol: string, expiry?: string) => {
+    if (!exchangeOk(exchange)) throw new Error('Unknown exchange.');
+    return options.listSnapshots(exchange, String(symbol), expiry);
+  });
+  ipcMain.handle('options:loadSnapshot', (_e, exchange: OptionExchange, symbol: string, expiry: string, t: number) => {
+    if (!exchangeOk(exchange)) throw new Error('Unknown exchange.');
+    return options.loadSnapshot(exchange, String(symbol), String(expiry), Number(t));
+  });
+  ipcMain.handle('options:saveSnapshot', (_e, s) => options.saveImportedSnapshot(s));
   ipcMain.handle('file:saveText', async (_e, name: string, content: string) => {
     const r = await dialog.showSaveDialog(win!, { defaultPath: name, filters: [{ name: 'Markdown', extensions: ['md'] }, { name: 'Text', extensions: ['txt'] }] });
     if (r.canceled || !r.filePath) return null;
