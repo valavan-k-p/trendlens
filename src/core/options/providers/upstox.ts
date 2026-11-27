@@ -9,7 +9,7 @@
 import { activeExpiries, expiryMoment, istDate, normalizeRows, withDerived } from '../option-contracts';
 import type { OptionChain, OptionExchange, OptionQuote, OptionUnderlying, UnderlyingKind } from '../types';
 
-export const UPSTOX_INSTRUMENTS_URL = (exchange: 'NSE' | 'BSE') => `https://assets.upstox.com/market-quote/instruments/exchange/${exchange}.json.gz`;
+export const UPSTOX_INSTRUMENTS_URL = (exchange: 'NSE' | 'BSE' | 'MCX') => `https://assets.upstox.com/market-quote/instruments/exchange/${exchange}.json.gz`;
 export const UPSTOX_CHAIN_URL = 'https://api.upstox.com/v2/option/chain';
 
 /** `base` exists only so tests can point at a local mock; the app uses the documented URL. */
@@ -30,6 +30,7 @@ interface UpstoxInstrument {
   lot_size?: number;
   strike_price?: number;
   trading_symbol?: string;
+  weekly?: boolean;
 }
 
 const KIND: Record<string, UnderlyingKind> = { INDEX: 'index', EQUITY: 'stock', COM: 'commodity' };
@@ -38,23 +39,27 @@ const KIND: Record<string, UnderlyingKind> = { INDEX: 'index', EQUITY: 'stock', 
 export function parseUpstoxInstruments(records: unknown, exchange: OptionExchange, now = Date.now() / 1000): OptionUnderlying[] {
   if (!Array.isArray(records)) throw new Error('Upstox instrument file is not a list.');
   const names = new Map<string, string>();
-  const groups = new Map<string, { sym: string; kind: UnderlyingKind; lot?: number; exp: Set<string> }>();
+  const groups = new Map<string, { sym: string; kind: UnderlyingKind; lot?: number; exp: Set<string>; monthly: Set<string>; name?: string }>();
   const optSegment = `${exchange}_FO`;
   for (const r of records as UpstoxInstrument[]) {
     if (r.instrument_key && r.name && (r.segment === `${exchange}_INDEX` || r.segment === `${exchange}_EQ`)) names.set(r.instrument_key, r.name);
     if (r.segment !== optSegment || (r.instrument_type !== 'CE' && r.instrument_type !== 'PE')) continue;
-    const key = r.underlying_key;
+    // MCX options sit on a different futures contract per expiry, so they are grouped by commodity.
+    const key = exchange === 'MCX' ? (r.underlying_symbol ? `MCX:${r.underlying_symbol}` : undefined) : r.underlying_key;
     const kind = KIND[r.underlying_type ?? ''];
     if (!key || !kind || !r.underlying_symbol || typeof r.expiry !== 'number') continue;
     let g = groups.get(key);
-    if (!g) groups.set(key, (g = { sym: r.underlying_symbol, kind, lot: r.lot_size, exp: new Set() }));
+    if (!g) groups.set(key, (g = { sym: r.underlying_symbol, kind, lot: r.lot_size, exp: new Set(), monthly: new Set(), name: r.name }));
     g.exp.add(istDate(r.expiry));
+    if (r.weekly === false) g.monthly.add(istDate(r.expiry));
   }
   const out: OptionUnderlying[] = [];
   for (const [key, g] of groups) {
     const expiries = activeExpiries([...g.exp], exchange, now);
     if (!expiries.length) continue;
-    out.push({ id: `${exchange}:${g.sym}`, symbol: g.sym, name: names.get(key) ?? g.sym, exchange, kind: g.kind, lotSize: g.lot, expiries, upstoxKey: key });
+    const monthly = expiries.filter((e) => g.monthly.has(e));
+    const upstoxKey = exchange === 'MCX' ? undefined : key;
+    out.push({ id: `${exchange}:${g.sym}`, symbol: g.sym, name: names.get(key) ?? (exchange === 'MCX' && g.name ? g.name : g.sym), exchange, kind: g.kind, lotSize: g.lot, expiries, monthlyExpiries: monthly.length ? monthly : undefined, upstoxKey });
   }
   return out.sort((a, b) => (a.kind === b.kind ? a.symbol.localeCompare(b.symbol) : a.kind === 'index' ? -1 : 1));
 }

@@ -14,9 +14,13 @@
 //|                             backfill at start, then appended)    |
 //|  heartbeat.json             every HeartbeatMs: bid/ask and the   |
 //|                             bar currently forming on every TF    |
+//|  options.json               every OptionsMs: quotes of the option|
+//|                             symbols in Market Watch (description |
+//|                             contains " CE " or " PE ") and of    |
+//|                             UnderlyingSymbols                    |
 //+------------------------------------------------------------------+
 #property copyright "TrendLens"
-#property version   "1.00"
+#property version   "1.10"
 #property strict
 
 input string Symbols      = "";                       // comma-separated; empty = this chart + Market Watch instruments
@@ -24,9 +28,12 @@ input string Timeframes   = "1,5,15,30,60,240,1440";  // minutes
 input int    BackfillBars = 2000;                     // closed bars written at start-up per symbol/TF
 input int    MaxSymbols   = 40;                       // cap when Symbols is empty
 input int    HeartbeatMs  = 1000;                     // live price / forming-bar refresh
+input bool   ExportOptions     = true;                // write option quotes to options.json
+input int    OptionsMs         = 2000;                // option quote refresh
+input string UnderlyingSymbols = "NIFTY#,BANKNIFTY#,FINNIFTY#,SENSEX,MCRO,NIFTY,BANKNIFTY,FINNIFTY"; // spot / futures prices sent with the options
 
 #define OUT_DIR       "TrendLens\\"
-#define FEED_VERSION  "1.00"
+#define FEED_VERSION  "1.10"
 #define CANDLE_HEADER "bar_time,symbol,tf,open,high,low,close,tick_volume,observed_server_time,source,session"
 #define OWNER_GV      "TRENDLENS_FEED_OWNER"
 #define OWNER_TS_GV   "TRENDLENS_FEED_OWNER_TS"
@@ -39,6 +46,7 @@ string   g_session;
 double   g_token   = 0;
 bool     g_started = false;
 datetime g_lastRetry = 0;
+uint     g_lastOptions = 0;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -73,6 +81,11 @@ void OnTimer()
    else if(TimeLocal() - g_lastRetry >= 10) BackfillPending();
    Poll();
    WriteHeartbeat();
+   if(ExportOptions && GetTickCount() - g_lastOptions >= (uint)MathMax(500, OptionsMs))
+     {
+      g_lastOptions = GetTickCount();
+      WriteOptions();
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -268,5 +281,65 @@ void WriteHeartbeat()
    FileWriteString(h, js);
    FileClose(h);
    FileMove(tmp, FILE_COMMON, OUT_DIR + "heartbeat.json", FILE_COMMON | FILE_REWRITE);
+  }
+
+//+------------------------------------------------------------------+
+//| Option quotes: read-only MarketInfo of Market Watch symbols whose|
+//| description names a call or put, plus the underlying prices.     |
+//+------------------------------------------------------------------+
+string JsonText(string s)
+  {
+   StringReplace(s, "\\", "\\\\");
+   StringReplace(s, "\"", "\\\"");
+   return "\"" + s + "\"";
+  }
+
+bool IsOptionDescription(string d)
+  {
+   return StringFind(d, " CE ") >= 0 || StringFind(d, " PE ") >= 0 || StringSubstr(d, StringLen(d) - 3) == " CE" || StringSubstr(d, StringLen(d) - 3) == " PE";
+  }
+
+string QuoteJson(string sym, string desc)
+  {
+   int d = (int)MarketInfo(sym, MODE_DIGITS);
+   return "{\"s\":" + JsonText(sym) + ",\"d\":" + JsonText(desc) +
+          ",\"b\":" + DoubleToString(MarketInfo(sym, MODE_BID), d) + ",\"a\":" + DoubleToString(MarketInfo(sym, MODE_ASK), d) +
+          ",\"t\":" + Ts((datetime)MarketInfo(sym, MODE_TIME)) + ",\"pc\":" + DoubleToString(iClose(sym, PERIOD_D1, 1), d) +
+          ",\"dg\":" + IntegerToString(d) + "}";
+  }
+
+void WriteOptions()
+  {
+   string opts = "";
+   int total = SymbolsTotal(true);
+   for(int i = 0; i < total; i++)
+     {
+      string sym = SymbolName(i, true);
+      string desc = SymbolInfoString(sym, SYMBOL_DESCRIPTION);
+      if(!IsOptionDescription(desc)) continue;
+      if(StringLen(opts) > 0) opts += ",";
+      opts += QuoteJson(sym, desc);
+     }
+   string unds = "";
+   string parts[];
+   int n = StringSplit(UnderlyingSymbols, ',', parts);
+   for(int i = 0; i < n; i++)
+     {
+      string sym = parts[i];
+      StringTrimLeft(sym); StringTrimRight(sym);
+      if(StringLen(sym) == 0 || MarketInfo(sym, MODE_BID) <= 0) continue;
+      if(StringLen(unds) > 0) unds += ",";
+      unds += QuoteJson(sym, SymbolInfoString(sym, SYMBOL_DESCRIPTION));
+     }
+   string js = "{\"feed\":\"TrendLensFeed\",\"version\":\"" + FEED_VERSION + "\"" +
+               ",\"server_time\":" + Ts(TimeCurrent()) + ",\"gmt_time\":" + Ts(TimeGMT()) +
+               ",\"connected\":" + (IsConnected() ? "true" : "false") +
+               ",\"options\":[" + opts + "],\"underlyings\":[" + unds + "]}";
+   string tmp = OUT_DIR + "options.tmp";
+   int h = FileOpen(tmp, FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
+   if(h == INVALID_HANDLE) return;
+   FileWriteString(h, js);
+   FileClose(h);
+   FileMove(tmp, FILE_COMMON, OUT_DIR + "options.json", FILE_COMMON | FILE_REWRITE);
   }
 //+------------------------------------------------------------------+

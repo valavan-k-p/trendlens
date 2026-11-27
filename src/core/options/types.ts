@@ -2,7 +2,7 @@
 
 export type OptionExchange = 'NSE' | 'BSE' | 'MCX';
 /** Where a chain came from. 'snapshot' = a locally saved chain being viewed again. */
-export type OptionProviderId = 'upstox' | 'dhan' | 'csv' | 'snapshot';
+export type OptionProviderId = 'upstox' | 'dhan' | 'mt4' | 'csv' | 'snapshot';
 export type UnderlyingKind = 'index' | 'stock' | 'commodity';
 
 export const OPTION_EXCHANGES: OptionExchange[] = ['NSE', 'BSE', 'MCX'];
@@ -19,6 +19,8 @@ export interface OptionUnderlying {
   lotSize?: number;
   /** Listed expiries, YYYY-MM-DD ascending. */
   expiries: string[];
+  /** The monthly expiries among them, when the contract list marks weekly series. */
+  monthlyExpiries?: string[];
   /** Upstox instrument key of the underlying, e.g. "NSE_INDEX|Nifty 50". */
   upstoxKey?: string;
   /** Dhan underlying: security id + segment; MCX options use a futures contract per expiry. */

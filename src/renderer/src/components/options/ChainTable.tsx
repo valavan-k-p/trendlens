@@ -92,33 +92,37 @@ export function ChainTable(p: ChainTableProps) {
   };
   const showCalls = p.show !== 'puts';
   const showPuts = p.show !== 'calls';
+  const has = (f: QuoteField) => p.rows.some((r) => r.call?.[f] !== undefined || r.put?.[f] !== undefined);
+  const present = new Set(COLS.filter((c) => c.f === 'ltp' || has(c.f)).map((c) => c.f));
+  const callCols = CALL_COLS.filter((c) => present.has(c.f));
+  const putCols = PUT_COLS.filter((c) => present.has(c.f));
 
   return (
     <div className="oc-table-wrap" ref={wrap}>
       <table className="oc-table">
         <thead>
           <tr className="oc-sides">
-            {showCalls && <th colSpan={CALL_COLS.length}>CALLS</th>}
+            {showCalls && <th colSpan={callCols.length}>CALLS</th>}
             <th className="oc-strike-h" />
-            {showPuts && <th colSpan={PUT_COLS.length}>PUTS</th>}
+            {showPuts && <th colSpan={putCols.length}>PUTS</th>}
           </tr>
           <tr>
-            {showCalls && CALL_COLS.map((c) => head('call', c))}
+            {showCalls && callCols.map((c) => head('call', c))}
             <th className={`oc-strike-h ${p.sort.key === 'strike' ? 'sorted' : ''}`} onClick={() => p.onSort('strike')}>
               Strike{p.sort.key === 'strike' ? (p.sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
             </th>
-            {showPuts && PUT_COLS.map((c) => head('put', c))}
+            {showPuts && putCols.map((c) => head('put', c))}
           </tr>
         </thead>
         <tbody>
           {p.rows.map((r) => (
             <tr key={r.strike} data-strike={r.strike} className={[r.strike === p.atm ? 'atm' : '', r.strike === p.selected ? 'sel' : ''].join(' ')} onClick={() => p.onSelect(r.strike)}>
-              {showCalls && CALL_COLS.map((c) => cell('call', r, c))}
+              {showCalls && callCols.map((c) => cell('call', r, c))}
               <td className="oc-strike">
                 {fmtStrike(r.strike)}
                 {r.strike === p.atm && <span className="oc-atm-tag">ATM</span>}
               </td>
-              {showPuts && PUT_COLS.map((c) => cell('put', r, c))}
+              {showPuts && putCols.map((c) => cell('put', r, c))}
             </tr>
           ))}
           {!p.rows.length && (

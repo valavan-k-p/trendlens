@@ -179,6 +179,8 @@ function registerIpc(): void {
     return resolveSettings(store.getSettings());
   });
   ipcMain.handle('options:test', (_e, provider: OptionDataProvider) => options.testProvider(provider));
+  ipcMain.handle('options:mt4Catalog', () => options.mt4Catalog());
+  ipcMain.handle('options:mt4Chain', (_e, req: { key: string; expiry: string }) => options.mt4ChainFor(String(req?.key ?? ''), String(req?.expiry ?? '')));
   ipcMain.handle('options:importCsv', async () => {
     const r = await dialog.showOpenDialog(win!, { title: 'Import option-chain CSV', filters: [{ name: 'CSV', extensions: ['csv', 'txt'] }], properties: ['openFile'] });
     if (r.canceled || !r.filePaths[0]) return null;

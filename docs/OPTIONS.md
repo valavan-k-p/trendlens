@@ -12,6 +12,7 @@ and credentials stay in the main process (`src/main/options/`).
 | Upstox Put/Call Option Chain — `GET api.upstox.com/v2/option/chain` | NSE, BSE (not MCX) | Bearer token; the free **Analytics Token** (read-only, 1-year validity) covers it | Live chain (default provider) |
 | Dhan scrip master — `images.dhan.co/api-data/api-scrip-master-detailed.csv` | NSE, BSE, MCX | Public, no key | Underlyings, lot sizes, expiries, MCX futures ids |
 | Dhan Option Chain — `POST api.dhan.co/v2/optionchain` | NSE, BSE, MCX | `access-token` + `client-id` headers; Data API plan (₹499/month); tokens last 24 h; 1 request / 3 s | MCX chains; optional NSE/BSE provider |
+| MetaTrader 4 via TrendLensFeed 1.10 (`Common\Files\TrendLens\options.json`) | whatever option symbols the broker's MT4 has in Market Watch | Your MT4 terminal | Live **prices only**: LTP (or bid/ask), change vs previous daily close |
 | CSV import | any | local file | Offline fallback, e.g. the CSV the NSE website lets a person download |
 
 Not used: NSE/BSE website endpoints (undocumented, bot-protected) and any scraping. Exchange
@@ -19,6 +20,23 @@ Not used: NSE/BSE website endpoints (undocumented, bot-protected) and any scrapi
 
 Routing: NSE and BSE use the provider chosen in Settings (Upstox by default); MCX always uses
 Dhan. Without credentials the tab says exactly what is missing and offers CSV import.
+
+### MetaTrader 4 option prices
+
+Source → **MetaTrader 4 (prices)** on the Option Chain tab. The bundled EA (1.10) exports, every
+2 s, the MarketInfo quote of each Market Watch symbol whose description names a call or put
+(e.g. Omega-MT4 Algo: `NFW_C_26000` = "NIFTY 26000 CE Wkly Opt"), plus `UnderlyingSymbols`
+(default `NIFTY#,BANKNIFTY#,FINNIFTY#,SENSEX,MCRO,NIFTY,BANKNIFTY,FINNIFTY`). Series are grouped by
+underlying and weekly/monthly. MT4 has **no option OI, volume, sizes, IV or expiry**:
+
+- Expiry: weekly series → nearest listed expiry, monthly → nearest monthly, from the public
+  contract list (Upstox instrument master, NSE/BSE/MCX). Marked "assumed" and changeable. Matching
+  call/put IVs across strikes is a quick check that the assumed expiry fits.
+- Underlying: the spot index (`<U> Spot Index`) for NSE/BSE options; the near-month future for
+  MCX, and for monthly index series when MT4 has no spot (that future is their forward; Black-76).
+- Equal bid and ask are taken as the traded price (how this feed publishes LTP); a real spread is
+  shown as bid/ask and the mid is used for IV.
+- OI-based figures (PCR, Max Pain, build-up, OI charts) are not shown for MT4 chains.
 
 ### Units and field notes
 

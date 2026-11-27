@@ -99,6 +99,34 @@ export interface OptionSnapshotMeta {
   summary: OptionSnapshot['summary'];
 }
 
+/** One option series found in MetaTrader 4 (prices only). */
+export interface Mt4OptionSeries {
+  /** e.g. "NIFTY:W" (weekly) or "NIFTY:M". */
+  key: string;
+  underlying: string;
+  exchange: OptionExchange;
+  weekly: boolean;
+  strikes: number;
+  /** Listed expiries from the exchange contract list (public), and the one the series most likely is. */
+  expiries: string[];
+  defaultExpiry?: string;
+  lotSize?: number;
+  underlyingSymbol?: string;
+  underlyingPrice?: number;
+}
+
+export interface Mt4OptionCatalog {
+  series: Mt4OptionSeries[];
+  exportFound: boolean;
+  version?: string;
+  /** Seconds since the EA last wrote options.json. */
+  ageSec?: number;
+  connected?: boolean;
+  /** What to do when MT4 option prices are unavailable. */
+  missing?: string;
+  error?: string;
+}
+
 export interface OptionCredentials {
   provider: OptionDataProvider;
   /** Upstox Analytics/access token or Dhan access token; null removes it, undefined keeps it. */
@@ -168,6 +196,8 @@ export interface TrendLensApi {
   reviewChart(req: ChartReviewRequest): Promise<ChartReviewResult>;
   optionCatalog(exchange: OptionExchange, refresh?: boolean): Promise<OptionCatalog>;
   optionChain(req: OptionChainRequest): Promise<OptionChainResult>;
+  mt4OptionCatalog(): Promise<Mt4OptionCatalog>;
+  mt4OptionChain(req: { key: string; expiry: string }): Promise<OptionChainResult>;
   setOptionCredentials(c: OptionCredentials): Promise<Settings>;
   testOptionProvider(provider: OptionDataProvider): Promise<{ ok: boolean; message: string }>;
   importOptionCsv(): Promise<{ fileName: string; parsed: ParsedOptionCsv } | null>;

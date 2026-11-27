@@ -34,6 +34,16 @@ describe('Upstox instrument master', () => {
     expect(() => parseUpstoxInstruments({}, 'NSE')).toThrow(/not a list/);
   });
 
+  it('groups MCX options by commodity although each expiry has its own futures contract', () => {
+    const mcx = [
+      { segment: 'MCX_FO', name: 'CRUDE OIL', instrument_type: 'CE', underlying_key: 'MCX_FO|580377', underlying_symbol: 'CRUDEOIL', underlying_type: 'COM', lot_size: 100, expiry: exp('2027-01-15'), strike_price: 8000 },
+      { segment: 'MCX_FO', name: 'CRUDE OIL', instrument_type: 'PE', underlying_key: 'MCX_FO|576264', underlying_symbol: 'CRUDEOIL', underlying_type: 'COM', lot_size: 100, expiry: exp('2026-12-16'), strike_price: 8000 },
+    ];
+    const list = parseUpstoxInstruments(mcx, 'MCX', NOW);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: 'MCX:CRUDEOIL', name: 'CRUDE OIL', kind: 'commodity', lotSize: 100, expiries: ['2026-12-16', '2027-01-15'], upstoxKey: undefined });
+  });
+
   it('builds the documented chain URL', () => {
     expect(upstoxChainUrl('NSE_INDEX|Nifty 50', '2026-12-01')).toBe('https://api.upstox.com/v2/option/chain?instrument_key=NSE_INDEX%7CNifty%2050&expiry_date=2026-12-01');
   });

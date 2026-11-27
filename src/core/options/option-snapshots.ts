@@ -86,7 +86,7 @@ export function fromSnapshot(s: OptionSnapshot): OptionChain {
     oiUnit: s.oiUnit,
     fetchedAt: s.t,
     rows,
-    notes: [`Saved snapshot of ${s.provider === 'csv' ? 'an imported CSV' : `the ${s.provider === 'upstox' ? 'Upstox' : 'Dhan'} feed`}.`],
+    notes: [`Saved snapshot of ${s.provider === 'csv' ? 'an imported CSV' : `the ${({ upstox: 'Upstox', dhan: 'Dhan', mt4: 'MetaTrader 4' } as const)[s.provider]} feed`}.`],
   };
 }
 

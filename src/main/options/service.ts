@@ -13,9 +13,10 @@ import { analyzeGreeks } from '@core/options/iv-analysis';
 import { summarizeChain } from '@core/options/option-analytics';
 import { shouldSnapshot, snapshotKey, toSnapshot, type OptionSnapshot } from '@core/options/option-snapshots';
 import { DHAN_CHAIN_URL, DHAN_SCRIP_MASTER_URL, dhanChainRequest, dhanError, parseDhanChain, parseDhanScripMaster } from '@core/options/providers/dhan';
+import { defaultExpiry, groupMt4Series, mt4Chain, parseMt4OptionsExport, pickUnderlying } from '@core/options/providers/mt4';
 import { parseUpstoxChain, parseUpstoxInstruments, upstoxChainUrl, upstoxError, UPSTOX_INSTRUMENTS_URL } from '@core/options/providers/upstox';
 import type { OptionChain, OptionExchange, OptionUnderlying } from '@core/options/types';
-import type { OptionCatalog, OptionChainRequest, OptionChainResult, OptionDataProvider } from '../../shared/api';
+import type { Mt4OptionCatalog, Mt4OptionSeries, OptionCatalog, OptionChainRequest, OptionChainResult, OptionDataProvider } from '../../shared/api';
 import { getSecret, getSettings } from '../store';
 import { SnapshotStore } from './snapshot-store';
 
@@ -202,18 +203,96 @@ export async function chain(req: OptionChainRequest): Promise<OptionChainResult>
   if (!c.rows.length) throw new Error(`${LABEL[provider]} returned no strikes for ${u.symbol} ${req.expiry}.`);
   lastFetch.set(key, { at: Date.now(), chain: c });
 
-  let saved = false;
+  return { chain: c, saved: maybeSave(c), cached: false };
+}
+
+/** Saves a snapshot when the interval since the last one for this underlying/expiry has passed. */
+function maybeSave(c: OptionChain): boolean {
   const snapKey = snapshotKey(c.exchange, c.symbol, c.expiry);
-  if (shouldSnapshot(lastSaved.get(snapKey), c.fetchedAt, getSettings().optionSnapshotSeconds)) {
-    try {
-      snapStore().save(snapshotOf(c));
-      lastSaved.set(snapKey, c.fetchedAt);
-      saved = true;
-    } catch {
-      // Snapshot saving is best-effort; the live chain is still returned.
-    }
+  if (!shouldSnapshot(lastSaved.get(snapKey), c.fetchedAt, getSettings().optionSnapshotSeconds)) return false;
+  try {
+    snapStore().save(snapshotOf(c));
+    lastSaved.set(snapKey, c.fetchedAt);
+    return true;
+  } catch {
+    // Snapshot saving is best-effort; the live chain is still returned.
+    return false;
   }
-  return { chain: c, saved, cached: false };
+}
+
+// ---------------------------------------------------------------------------
+// MetaTrader 4 option prices (TrendLensFeed 1.10+ writes options.json)
+
+const MT4_OPTIONS_FILE = () => join(app.getPath('appData'), 'MetaQuotes', 'Terminal', 'Common', 'Files', 'TrendLens', 'options.json');
+const MT4_SETUP =
+  'In TrendLens: Settings → Install MT4 live feed. In MT4: remove TrendLensFeed from its chart and drag it on again (or restart MT4) so version 1.10 runs, and keep the option symbols in Market Watch.';
+
+/** The public exchange contract list (Upstox instrument master, no key needed): expiries, monthly flags, lot sizes. */
+async function publicContracts(exchange: OptionExchange): Promise<OptionUnderlying[]> {
+  const key = `public:${exchange}`;
+  const mem = catalogs.get(key);
+  if (mem && Date.now() / 1000 - mem.updatedAt < CATALOG_MAX_AGE_MS / 1000) return mem.list;
+  const f = await cachedFile(`upstox-${exchange}.json.gz`, UPSTOX_INSTRUMENTS_URL(exchange), false);
+  const list = parseUpstoxInstruments(JSON.parse(gunzipSync(f.data).toString('utf8')), exchange);
+  catalogs.set(key, { list, updatedAt: f.updatedAt });
+  return list;
+}
+
+function readMt4Export() {
+  const p = MT4_OPTIONS_FILE();
+  if (!existsSync(p)) return undefined;
+  return parseMt4OptionsExport(readFileSync(p, 'utf8'));
+}
+
+async function contractFor(exchange: OptionExchange, symbol: string): Promise<OptionUnderlying | undefined> {
+  try {
+    return (await publicContracts(exchange)).find((u) => u.symbol === symbol);
+  } catch {
+    return undefined;
+  }
+}
+
+export async function mt4Catalog(): Promise<Mt4OptionCatalog> {
+  let exp;
+  try {
+    exp = readMt4Export();
+  } catch (e) {
+    return { series: [], exportFound: true, error: (e as Error).message, missing: MT4_SETUP };
+  }
+  if (!exp) return { series: [], exportFound: false, missing: `MetaTrader 4 option prices are not being exported yet. ${MT4_SETUP}` };
+  const ageSec = Math.max(0, Date.now() / 1000 - exp.gmtTime);
+  const series: Mt4OptionSeries[] = [];
+  for (const s of groupMt4Series(exp)) {
+    const c = await contractFor(s.exchange, s.underlying);
+    const und = pickUnderlying(s, exp.underlyings);
+    series.push({
+      key: s.key,
+      underlying: s.underlying,
+      exchange: s.exchange,
+      weekly: s.weekly,
+      strikes: new Set([...s.calls.keys(), ...s.puts.keys()]).size,
+      expiries: c?.expiries ?? [],
+      defaultExpiry: defaultExpiry(s, c),
+      lotSize: c?.lotSize,
+      underlyingSymbol: und?.quote.symbol,
+      underlyingPrice: und?.price,
+    });
+  }
+  let missing: string | undefined;
+  if (!series.length) missing = 'No option symbols found in MT4 Market Watch. In MT4 open Market Watch → Symbols and show the option groups (e.g. NIFTY_OPTIONS).';
+  else if (ageSec > 120) missing = `MT4 option prices were last written ${Math.round(ageSec / 60)} min ago: MT4 or TrendLensFeed is not running.`;
+  return { series, exportFound: true, version: exp.version, ageSec, connected: exp.connected, missing };
+}
+
+export async function mt4ChainFor(key: string, expiry: string): Promise<OptionChainResult> {
+  const exp = readMt4Export();
+  if (!exp) throw new Error(`MetaTrader 4 option prices are not being exported yet. ${MT4_SETUP}`);
+  const s = groupMt4Series(exp).find((x) => x.key === key);
+  if (!s) throw new Error(`The MT4 option series ${key} is no longer in Market Watch.`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)) throw new Error('Choose the expiry of this MT4 option series.');
+  const c = await contractFor(s.exchange, s.underlying);
+  const chain = mt4Chain(s, exp, { expiry, lotSize: c?.lotSize, underlying: pickUnderlying(s, exp.underlyings), expiryAssumed: expiry === defaultExpiry(s, c) });
+  return { chain, saved: maybeSave(chain), cached: false };
 }
 
 /** Checks stored credentials with one small real request (NIFTY on NSE, or the first MCX underlying for Dhan). */

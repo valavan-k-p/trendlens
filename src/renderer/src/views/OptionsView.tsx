@@ -11,7 +11,7 @@ import { chainFreshness, expiryMoment, marketSession } from '@core/options/optio
 import { fromSnapshot, toSnapshot } from '@core/options/option-snapshots';
 import type { ParsedOptionCsv } from '@core/options/providers/csv';
 import { IST_OFFSET, type OptionChain, type OptionExchange, type UnderlyingKind } from '@core/options/types';
-import type { OptionCatalog, OptionSnapshotMeta, Settings } from '../../../shared/api';
+import type { Mt4OptionCatalog, OptionCatalog, OptionSnapshotMeta, Settings } from '../../../shared/api';
 import { AnalyticsCards } from '../components/options/AnalyticsCards';
 import { ChainTable } from '../components/options/ChainTable';
 import { GreeksPanel } from '../components/options/GreeksPanel';
@@ -32,7 +32,12 @@ const KIND_LABEL: Record<UnderlyingKind, string> = { index: 'Index', stock: 'Sto
 const PROVIDER_LABEL = { upstox: 'Upstox', dhan: 'Dhan' } as const;
 const PREFS = 'trendlens.options.v1';
 
+type Source = 'api' | 'mt4';
+
 interface Prefs {
+  source: Source;
+  mt4Key: string;
+  mt4Expiry: string;
   exchange: OptionExchange;
   kind: UnderlyingKind;
   underlyingId: string;
@@ -42,7 +47,7 @@ interface Prefs {
   refreshSec: number;
   show: 'both' | 'calls' | 'puts';
 }
-const DEFAULT_PREFS: Prefs = { exchange: 'NSE', kind: 'index', underlyingId: 'NSE:NIFTY', expiry: '', range: 15, units: 'lots', refreshSec: 30, show: 'both' };
+const DEFAULT_PREFS: Prefs = { source: 'api', mt4Key: 'NIFTY:W', mt4Expiry: '', exchange: 'NSE', kind: 'index', underlyingId: 'NSE:NIFTY', expiry: '', range: 15, units: 'lots', refreshSec: 30, show: 'both' };
 function loadPrefs(): Prefs {
   try {
     return { ...DEFAULT_PREFS, ...(JSON.parse(localStorage.getItem(PREFS) ?? '{}') as Partial<Prefs>) };
@@ -188,6 +193,10 @@ function CsvImportDialog({
 
 export function OptionsView({ settings, active, notify, onOpenSettings }: { settings: Settings; active: boolean; notify: (m: string, e?: boolean) => void; onOpenSettings: () => void }) {
   const init = useMemo(loadPrefs, []);
+  const [source, setSource] = useState<Source>(init.source);
+  const [mt4Key, setMt4Key] = useState(init.mt4Key);
+  const [mt4Expiry, setMt4Expiry] = useState(init.mt4Expiry);
+  const [mt4Cat, setMt4Cat] = useState<Mt4OptionCatalog | null>(null);
   const [exchange, setExchange] = useState<OptionExchange>(init.exchange);
   const [kind, setKind] = useState<UnderlyingKind>(init.kind);
   const [underlyingId, setUnderlyingId] = useState(init.underlyingId);
@@ -217,8 +226,8 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
   const keyRef = useRef('');
 
   useEffect(() => {
-    localStorage.setItem(PREFS, JSON.stringify({ exchange, kind, underlyingId, expiry, range, units, refreshSec, show } satisfies Prefs));
-  }, [exchange, kind, underlyingId, expiry, range, units, refreshSec, show]);
+    localStorage.setItem(PREFS, JSON.stringify({ source, mt4Key, mt4Expiry, exchange, kind, underlyingId, expiry, range, units, refreshSec, show } satisfies Prefs));
+  }, [source, mt4Key, mt4Expiry, exchange, kind, underlyingId, expiry, range, units, refreshSec, show]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now() / 1000), 5000);
@@ -240,9 +249,33 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
     [exchange],
   );
   useEffect(() => {
-    if (active) void loadCatalog();
+    if (active && source === 'api') void loadCatalog();
     // Settings changes (provider, credentials) re-evaluate what is configured.
-  }, [active, loadCatalog, settings.optionProvider, settings.optionKeys.upstox, settings.optionKeys.dhan]);
+  }, [active, source, loadCatalog, settings.optionProvider, settings.optionKeys.upstox, settings.optionKeys.dhan]);
+
+  // ---- MetaTrader 4 option series (prices only, from the TrendLensFeed EA)
+  const loadMt4 = useCallback(async () => {
+    try {
+      setMt4Cat(await window.trendlens.mt4OptionCatalog());
+    } catch (e) {
+      setMt4Cat({ series: [], exportFound: false, error: cleanError(e) });
+    }
+  }, []);
+  useEffect(() => {
+    if (!active || source !== 'mt4') return;
+    void loadMt4();
+    const id = setInterval(() => void loadMt4(), 30_000);
+    return () => clearInterval(id);
+  }, [active, source, loadMt4]);
+  const mt4Series = mt4Cat?.series.find((s) => s.key === mt4Key);
+  useEffect(() => {
+    if (!mt4Cat?.series.length) return;
+    if (!mt4Series) setMt4Key((mt4Cat.series.find((s) => s.key === 'NIFTY:W') ?? mt4Cat.series[0]).key);
+  }, [mt4Cat, mt4Series]);
+  useEffect(() => {
+    if (mt4Series && mt4Series.expiries.length && !mt4Series.expiries.includes(mt4Expiry)) setMt4Expiry(mt4Series.defaultExpiry ?? mt4Series.expiries[0]);
+  }, [mt4Series, mt4Expiry]);
+  const mt4Ready = !!mt4Series && /^\d{4}-\d{2}-\d{2}$/.test(mt4Expiry);
 
   const kinds = useMemo(() => [...new Set((catalog?.underlyings ?? []).map((u) => u.kind))], [catalog]);
   const list = useMemo(() => (catalog?.underlyings ?? []).filter((u) => u.kind === kind), [catalog, kind]);
@@ -263,7 +296,7 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
     if (underlying && !underlying.expiries.includes(expiry)) setExpiry(underlying.expiries[0]);
   }, [underlying, expiry]);
 
-  const chainKey = `${exchange}|${underlyingId}|${expiry}`;
+  const chainKey = source === 'mt4' ? `mt4|${mt4Key}|${mt4Expiry}` : `${exchange}|${underlyingId}|${expiry}`;
   useEffect(() => {
     keyRef.current = chainKey;
     setLive(null);
@@ -274,28 +307,30 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
   }, [chainKey]);
 
   // ---- snapshots for this underlying
-  const symbol = underlying?.symbol ?? offline?.chain.symbol;
+  const symbol = offline?.chain.symbol ?? (source === 'mt4' ? mt4Series?.underlying : underlying?.symbol);
+  const symbolExchange = offline?.chain.exchange ?? (source === 'mt4' ? mt4Series?.exchange : undefined) ?? exchange;
   const loadMetas = useCallback(async () => {
-    const ex = offline?.chain.exchange ?? exchange;
+    const ex = symbolExchange;
     if (!symbol) return setMetas([]);
     try {
       setMetas(await window.trendlens.optionSnapshots(ex, symbol));
     } catch {
       setMetas([]);
     }
-  }, [exchange, symbol, offline]);
+  }, [symbolExchange, symbol]);
   useEffect(() => {
     if (active) void loadMetas();
   }, [active, loadMetas]);
 
   // ---- live fetch + auto refresh
   const fetchNow = useCallback(async () => {
-    if (inflight.current || !catalog?.configured || !underlying || !expiry || !underlying.expiries.includes(expiry)) return;
+    if (inflight.current) return;
+    if (source === 'mt4' ? !mt4Ready : !catalog?.configured || !underlying || !expiry || !underlying.expiries.includes(expiry)) return;
     inflight.current = true;
     setFetching(true);
     const key = chainKey;
     try {
-      const r = await window.trendlens.optionChain({ exchange, underlyingId, expiry });
+      const r = source === 'mt4' ? await window.trendlens.mt4OptionChain({ key: mt4Key, expiry: mt4Expiry }) : await window.trendlens.optionChain({ exchange, underlyingId, expiry });
       if (keyRef.current !== key) return;
       setLive((prev) => {
         if (prev && prev.fetchedAt !== r.chain.fetchedAt) prevLive.current = prev;
@@ -310,16 +345,17 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
       inflight.current = false;
       setFetching(false);
     }
-  }, [catalog, underlying, expiry, exchange, underlyingId, chainKey, loadMetas]);
+  }, [source, mt4Ready, mt4Key, mt4Expiry, catalog, underlying, expiry, exchange, underlyingId, chainKey, loadMetas]);
 
+  const canFetch = source === 'mt4' ? mt4Ready : !!catalog?.configured;
   useEffect(() => {
-    if (!active || offline || !catalog?.configured) return;
+    if (!active || offline || !canFetch) return;
     void fetchNow();
     if (refreshSec <= 0) return;
     const id = setInterval(() => void fetchNow(), refreshSec * 1000);
     return () => clearInterval(id);
     // fetchNow changes with the selection; the interval restarts with it.
-  }, [active, offline, catalog?.configured, refreshSec, fetchNow]);
+  }, [active, offline, canFetch, refreshSec, fetchNow]);
 
   // ---- derived data
   const chain = offline?.chain ?? live;
@@ -331,6 +367,17 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
   const windowRows = useMemo(() => (chain && summary ? strikeWindow(chain.rows, summary.atm, range) : []), [chain, summary, range]);
   const shownRows = useMemo(() => sortRows(filterRows(windowRows, { search, moneyness: money, hideEmpty }, price), sort.key, sort.dir), [windowRows, search, money, hideEmpty, price, sort]);
   const windowStrikes = useMemo(() => new Set(windowRows.map((x) => x.strike)), [windowRows]);
+  // Where the source gives no IV (MT4, some CSVs), the table shows the calculated IV instead.
+  const tableRows = useMemo(() => {
+    if (!greeks) return shownRows;
+    const byStrike = new Map(greeks.rows.map((g) => [g.strike, g]));
+    const fill = (q: OptionChain['rows'][number]['call'], iv: number | undefined) => (q && q.iv === undefined && iv !== undefined ? { ...q, iv } : q);
+    return shownRows.map((r) => {
+      const g = byStrike.get(r.strike);
+      return { strike: r.strike, call: fill(r.call, g?.call?.ivCalculated), put: fill(r.put, g?.put?.ivCalculated) };
+    });
+  }, [shownRows, greeks]);
+  const hasOi = !!chain?.rows.some((x) => x.call?.oi !== undefined || x.put?.oi !== undefined);
   const prevGreeks = useMemo(() => (prevLive.current && !offline ? analyzeGreeks(prevLive.current, { r, qFallback, now: prevLive.current.fetchedAt }) : null), [live, offline, r, qFallback]);
 
   const ivChange = useMemo(() => {
@@ -403,6 +450,44 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
     <div className="page oc-page">
       <div className="oc-controls">
         <label>
+          Source
+          <select value={source} onChange={(e) => setSource(e.target.value as Source)}>
+            <option value="api">Broker API (OI, IV)</option>
+            <option value="mt4">MetaTrader 4 (prices)</option>
+          </select>
+        </label>
+        {source === 'mt4' ? (
+          <>
+            <label>
+              MT4 series
+              <select value={mt4Key} onChange={(e) => setMt4Key(e.target.value)} disabled={!mt4Cat?.series.length}>
+                {(mt4Cat?.series ?? []).map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.underlying} · {s.weekly ? 'weekly' : 'monthly'} ({s.exchange}, {s.strikes} strikes)
+                  </option>
+                ))}
+                {!mt4Cat?.series.length && <option value={mt4Key}>{mt4Cat ? 'none found' : 'loading…'}</option>}
+              </select>
+            </label>
+            <label>
+              Expiry {mt4Series && mt4Expiry === mt4Series.defaultExpiry ? '(assumed)' : ''}
+              {mt4Series?.expiries.length ? (
+                <select value={mt4Expiry} onChange={(e) => setMt4Expiry(e.target.value)}>
+                  {mt4Series.expiries.map((x) => (
+                    <option key={x} value={x}>
+                      {expiryLabel(x)}
+                      {x === mt4Series.defaultExpiry ? ' · assumed' : ''}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input type="date" value={mt4Expiry} onChange={(e) => setMt4Expiry(e.target.value)} />
+              )}
+            </label>
+          </>
+        ) : (
+          <>
+        <label>
           Exchange
           <select value={exchange} onChange={(e) => setExchange(e.target.value as OptionExchange)}>
             <option>NSE</option>
@@ -455,6 +540,8 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
             ))}
           </select>
         </label>
+          </>
+        )}
         <label>
           Show
           <select value={show} onChange={(e) => setShow(e.target.value as Prefs['show'])}>
@@ -474,6 +561,7 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
             <option value="all">All</option>
           </select>
         </label>
+        {source !== 'mt4' && (
         <label>
           OI in
           <select value={units} onChange={(e) => setUnits(e.target.value as 'lots' | 'units')}>
@@ -481,6 +569,7 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
             <option value="units">Quantity</option>
           </select>
         </label>
+        )}
         <label>
           Auto-refresh
           <select value={refreshSec} onChange={(e) => setRefreshSec(Number(e.target.value))}>
@@ -492,7 +581,7 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
             ))}
           </select>
         </label>
-        <button className="btn btn-sm" onClick={() => void fetchNow()} disabled={fetching || !catalog?.configured || !!offline} title="Refresh now">
+        <button className="btn btn-sm" onClick={() => void fetchNow()} disabled={fetching || !canFetch || !!offline} title="Refresh now">
           {fetching ? <span className="spinner" /> : '⟳ Refresh'}
         </button>
         <button className="btn btn-sm" onClick={() => void importCsv()} title="Load an option-chain CSV (e.g. downloaded from the NSE website)">
@@ -508,6 +597,28 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
             <button className="btn btn-sm" onClick={() => setOffline(null)}>
               Back to live
             </button>
+          </>
+        ) : source === 'mt4' ? (
+          <>
+            <span className="oc-prov">MT4</span>
+            {mt4Cat?.missing || mt4Cat?.error ? (
+              <span className="tone-warn">{mt4Cat.error ?? mt4Cat.missing}</span>
+            ) : error ? (
+              <span className="tone-bear">● {error}</span>
+            ) : live ? (
+              <span className={freshness === 'fresh' ? 'live-ok' : freshness === 'delayed' ? 'tone-warn' : 'tone-bear'}>
+                {freshness === 'fresh' && session === 'open' && <span className="live-dot" />}
+                {session === 'closed' ? 'Market closed · last prices' : freshness === 'fresh' ? 'Live prices' : freshness === 'delayed' ? 'Delayed' : 'Stale prices'} · written by TrendLensFeed {istTime(live.fetchedAt, false)} ({age(now - live.fetchedAt)})
+              </span>
+            ) : (
+              <span>{mt4Cat ? 'Loading prices…' : 'Reading MT4…'}</span>
+            )}
+            {mt4Series && (
+              <span className="oc-faint">
+                {mt4Series.underlyingSymbol ? `underlying ${mt4Series.underlyingSymbol}` : 'no underlying quote'}
+                {mt4Series.lotSize ? ` · lot ${mt4Series.lotSize}` : ''} · prices only: no OI, volume or provider IV
+              </span>
+            )}
           </>
         ) : (
           <>
@@ -547,7 +658,23 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
 
       {!chain ? (
         <div className="empty">
-          {catLoading ? (
+          {source === 'mt4' && !offline ? (
+            mt4Cat?.missing || mt4Cat?.error ? (
+              <>
+                <h3>MetaTrader 4 option prices</h3>
+                <p style={{ maxWidth: 680, margin: '0 auto 12px' }}>{mt4Cat.error ?? mt4Cat.missing}</p>
+                <button className="btn" onClick={() => void loadMt4()}>
+                  Check again
+                </button>
+              </>
+            ) : error ? (
+              <p className="tone-bear">{error}</p>
+            ) : (
+              <p>
+                <span className="spinner" /> Reading MetaTrader 4 option prices…
+              </p>
+            )
+          ) : catLoading ? (
             <p>
               <span className="spinner" /> Loading the {exchange} instrument list…
             </p>
@@ -623,7 +750,7 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
                 )}
                 <ChainTable
                   chain={chain}
-                  rows={shownRows}
+                  rows={tableRows}
                   price={price}
                   atm={summary.atm}
                   show={show}
@@ -636,14 +763,21 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
                   scrollKey={`${chain.provider}|${chain.symbol}|${chain.expiry}|${offline?.label ?? ''}`}
                 />
                 <p className="oc-note">
-                  Shaded cells are in the money. Highest OI and highest OI addition on each side are outlined. Chg and Chg OI are against the previous trading day as reported by the source. Click a header to sort, a
-                  row to select a strike.
+                  {!hasOi && 'Shaded cells are in the money. IV is calculated from the prices (Greeks & IV tab shows the model). Chg is against the previous daily close in the source. Click a header to sort, a row to select a strike.'}
+                  {hasOi && <>Shaded cells are in the money. Highest OI and highest OI addition on each side are outlined. Chg and Chg OI are against the previous trading day as reported by the source. Click a header to sort, a
+                  row to select a strike.</>}
                 </p>
               </>
             )}
-            {tab === 'oi' && <OiAnalysis chain={chain} rows={windowRows} s={summary} units={units} pcrHistory={metas.filter((m) => m.expiry === chain.expiry)} onPick={pick} />}
+            {(tab === 'oi' || tab === 'maxpain') && !hasOi && (
+              <div className="card oc-note" style={{ fontSize: 13 }}>
+                {tab === 'oi' ? 'OI analysis' : 'Max Pain'} needs open interest, and {chain.provider === 'mt4' ? 'MetaTrader 4 provides option prices only' : 'this chain has no open interest'}. Use a broker API source
+                (Settings → Option chain data) for OI, PCR and Max Pain. The Option Chain and Greeks & IV tabs work from prices.
+              </div>
+            )}
+            {tab === 'oi' && hasOi && <OiAnalysis chain={chain} rows={windowRows} s={summary} units={units} pcrHistory={metas.filter((m) => m.expiry === chain.expiry)} onPick={pick} />}
             {tab === 'greeks' && <GreeksPanel chain={chain} g={greeks} strikes={windowStrikes} ivChange={ivChange} ivStats={ivStats} onPick={pick} />}
-            {tab === 'maxpain' && <MaxPainPanel chain={chain} s={summary} strikes={windowStrikes} />}
+            {tab === 'maxpain' && hasOi && <MaxPainPanel chain={chain} s={summary} strikes={windowStrikes} />}
             {tab === 'history' && <HistoryPanel chain={chain} metas={metas} expiry={chain.expiry} strikes={windowStrikes} units={units} snapshotSeconds={settings.optionSnapshotSeconds} onView={(m) => void viewSnapshot(m)} />}
             <p className="disclaimer">Option data and interpretations are for education only, not investment advice. Build-up and writing labels describe price and OI changes, not who traded.</p>
           </>

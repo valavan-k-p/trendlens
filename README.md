@@ -13,8 +13,8 @@ No login: it opens straight to the analyzer.
 
 **Installed app** (after `npm run dist`):
 
-- `release\TrendLens Setup 1.1.0.exe` — installer (Start menu + desktop shortcut), or
-- `release\TrendLens-Portable-1.1.0.exe` — single portable exe, no install.
+- `release\TrendLens Setup 1.2.0.exe` — installer (Start menu + desktop shortcut), or
+- `release\TrendLens-Portable-1.2.0.exe` — single portable exe, no install.
 
 **From source** (Node.js 22.12+):
 
@@ -85,7 +85,10 @@ docs/            PLAN.md, ANALYSIS.md (every rule and threshold)
   token). Settings → Option chain data stores them encrypted. Without a token, the Option Chain
   tab says what is missing and accepts a CSV (e.g. the NSE website's download). Underlyings, lot
   sizes and expiries come from the providers' public instrument lists. Snapshots are saved
-  locally for history. Details and assumptions: `docs/OPTIONS.md`.
+  locally for history. Without a broker API, **Source → MetaTrader 4 (prices)** shows live option
+  prices from your MT4 (TrendLensFeed 1.10 exports the option symbols in Market Watch) with
+  calculated IV and Greeks; MT4 has no option OI, so PCR and Max Pain need a broker API.
+  Details and assumptions: `docs/OPTIONS.md`.
 - Yahoo Finance public chart/search endpoints: no key; unofficial, intended here for
   personal use; quotes for some exchanges are delayed. Indices and forex report no
   volume, so volume modules are skipped for them.
