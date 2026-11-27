@@ -20,7 +20,7 @@
 //|                             UnderlyingSymbols                    |
 //+------------------------------------------------------------------+
 #property copyright "TrendLens"
-#property version   "1.10"
+#property version   "1.11"
 #property strict
 
 input string Symbols      = "";                       // comma-separated; empty = this chart + Market Watch instruments
@@ -29,11 +29,11 @@ input int    BackfillBars = 2000;                     // closed bars written at 
 input int    MaxSymbols   = 40;                       // cap when Symbols is empty
 input int    HeartbeatMs  = 1000;                     // live price / forming-bar refresh
 input bool   ExportOptions     = true;                // write option quotes to options.json
-input int    OptionsMs         = 2000;                // option quote refresh
+input int    OptionsMs         = 500;                 // option quote refresh (written only when a price changed)
 input string UnderlyingSymbols = "NIFTY#,BANKNIFTY#,FINNIFTY#,SENSEX,MCRO,NIFTY,BANKNIFTY,FINNIFTY"; // spot / futures prices sent with the options
 
 #define OUT_DIR       "TrendLens\\"
-#define FEED_VERSION  "1.10"
+#define FEED_VERSION  "1.11"
 #define CANDLE_HEADER "bar_time,symbol,tf,open,high,low,close,tick_volume,observed_server_time,source,session"
 #define OWNER_GV      "TRENDLENS_FEED_OWNER"
 #define OWNER_TS_GV   "TRENDLENS_FEED_OWNER_TS"
@@ -47,6 +47,9 @@ double   g_token   = 0;
 bool     g_started = false;
 datetime g_lastRetry = 0;
 uint     g_lastOptions = 0;
+uint     g_lastHeartbeat = 0;
+uint     g_lastOptWrite = 0;
+string   g_lastOptBody = "";
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -61,7 +64,8 @@ int OnInit()
    ArrayResize(g_filled, n);
    ArrayInitialize(g_lastBar, 0);
    ArrayInitialize(g_filled, false);
-   EventSetMillisecondTimer(MathMax(250, HeartbeatMs));
+   // The timer runs at the faster of the heartbeat and option intervals; each output keeps its own pace.
+   EventSetMillisecondTimer((int)MathMax(100, ExportOptions ? MathMin(HeartbeatMs, OptionsMs) : HeartbeatMs));
    Print("TrendLensFeed ", FEED_VERSION, ": ", ArraySize(g_symbols), " symbols, timeframes ", Timeframes);
    return(INIT_SUCCEEDED);
   }
@@ -80,8 +84,12 @@ void OnTimer()
    if(!g_started) { g_started = true; BackfillPending(); }
    else if(TimeLocal() - g_lastRetry >= 10) BackfillPending();
    Poll();
-   WriteHeartbeat();
-   if(ExportOptions && GetTickCount() - g_lastOptions >= (uint)MathMax(500, OptionsMs))
+   if(GetTickCount() - g_lastHeartbeat >= (uint)MathMax(250, HeartbeatMs))
+     {
+      g_lastHeartbeat = GetTickCount();
+      WriteHeartbeat();
+     }
+   if(ExportOptions && GetTickCount() - g_lastOptions >= (uint)MathMax(100, OptionsMs))
      {
       g_lastOptions = GetTickCount();
       WriteOptions();
@@ -331,6 +339,11 @@ void WriteOptions()
       if(StringLen(unds) > 0) unds += ",";
       unds += QuoteJson(sym, SymbolInfoString(sym, SYMBOL_DESCRIPTION));
      }
+   // Skip the write when no price changed (still rewritten every 5 s so the app sees the feed is alive).
+   string body = opts + "|" + unds;
+   if(body == g_lastOptBody && GetTickCount() - g_lastOptWrite < 5000) return;
+   g_lastOptBody  = body;
+   g_lastOptWrite = GetTickCount();
    string js = "{\"feed\":\"TrendLensFeed\",\"version\":\"" + FEED_VERSION + "\"" +
                ",\"server_time\":" + Ts(TimeCurrent()) + ",\"gmt_time\":" + Ts(TimeGMT()) +
                ",\"connected\":" + (IsConnected() ? "true" : "false") +

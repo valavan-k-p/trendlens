@@ -38,6 +38,8 @@ interface Prefs {
   source: Source;
   mt4Key: string;
   mt4Expiry: string;
+  /** Seconds between MT4 refreshes; -1 = live (refresh on every MT4 update), 0 = off. */
+  mt4Refresh: number;
   exchange: OptionExchange;
   kind: UnderlyingKind;
   underlyingId: string;
@@ -47,7 +49,7 @@ interface Prefs {
   refreshSec: number;
   show: 'both' | 'calls' | 'puts';
 }
-const DEFAULT_PREFS: Prefs = { source: 'api', mt4Key: 'NIFTY:W', mt4Expiry: '', exchange: 'NSE', kind: 'index', underlyingId: 'NSE:NIFTY', expiry: '', range: 15, units: 'lots', refreshSec: 30, show: 'both' };
+const DEFAULT_PREFS: Prefs = { source: 'api', mt4Key: 'NIFTY:W', mt4Expiry: '', mt4Refresh: -1, exchange: 'NSE', kind: 'index', underlyingId: 'NSE:NIFTY', expiry: '', range: 15, units: 'lots', refreshSec: 30, show: 'both' };
 function loadPrefs(): Prefs {
   try {
     return { ...DEFAULT_PREFS, ...(JSON.parse(localStorage.getItem(PREFS) ?? '{}') as Partial<Prefs>) };
@@ -197,6 +199,7 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
   const [mt4Key, setMt4Key] = useState(init.mt4Key);
   const [mt4Expiry, setMt4Expiry] = useState(init.mt4Expiry);
   const [mt4Cat, setMt4Cat] = useState<Mt4OptionCatalog | null>(null);
+  const [mt4Refresh, setMt4Refresh] = useState(init.mt4Refresh);
   const [exchange, setExchange] = useState<OptionExchange>(init.exchange);
   const [kind, setKind] = useState<UnderlyingKind>(init.kind);
   const [underlyingId, setUnderlyingId] = useState(init.underlyingId);
@@ -224,10 +227,12 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
   const prevLive = useRef<OptionChain | null>(null);
   const inflight = useRef(false);
   const keyRef = useRef('');
+  const pendingFetch = useRef(false);
+  const fetchRef = useRef<() => Promise<void>>(async () => undefined);
 
   useEffect(() => {
-    localStorage.setItem(PREFS, JSON.stringify({ source, mt4Key, mt4Expiry, exchange, kind, underlyingId, expiry, range, units, refreshSec, show } satisfies Prefs));
-  }, [source, mt4Key, mt4Expiry, exchange, kind, underlyingId, expiry, range, units, refreshSec, show]);
+    localStorage.setItem(PREFS, JSON.stringify({ source, mt4Key, mt4Expiry, mt4Refresh, exchange, kind, underlyingId, expiry, range, units, refreshSec, show } satisfies Prefs));
+  }, [source, mt4Key, mt4Expiry, mt4Refresh, exchange, kind, underlyingId, expiry, range, units, refreshSec, show]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now() / 1000), 5000);
@@ -324,7 +329,10 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
 
   // ---- live fetch + auto refresh
   const fetchNow = useCallback(async () => {
-    if (inflight.current) return;
+    if (inflight.current) {
+      pendingFetch.current = true;
+      return;
+    }
     if (source === 'mt4' ? !mt4Ready : !catalog?.configured || !underlying || !expiry || !underlying.expiries.includes(expiry)) return;
     inflight.current = true;
     setFetching(true);
@@ -344,18 +352,30 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
     } finally {
       inflight.current = false;
       setFetching(false);
+      if (pendingFetch.current) {
+        pendingFetch.current = false;
+        void fetchRef.current();
+      }
     }
   }, [source, mt4Ready, mt4Key, mt4Expiry, catalog, underlying, expiry, exchange, underlyingId, chainKey, loadMetas]);
 
+  fetchRef.current = fetchNow;
   const canFetch = source === 'mt4' ? mt4Ready : !!catalog?.configured;
+  // Polling interval: the API refresh setting, or for MT4 its own setting (live mode keeps a 5 s safety poll).
+  const pollSec = source === 'mt4' ? (mt4Refresh < 0 ? 5 : mt4Refresh) : refreshSec;
   useEffect(() => {
     if (!active || offline || !canFetch) return;
     void fetchNow();
-    if (refreshSec <= 0) return;
-    const id = setInterval(() => void fetchNow(), refreshSec * 1000);
+    if (pollSec <= 0) return;
+    const id = setInterval(() => void fetchNow(), pollSec * 1000);
     return () => clearInterval(id);
     // fetchNow changes with the selection; the interval restarts with it.
-  }, [active, offline, canFetch, refreshSec, fetchNow]);
+  }, [active, offline, canFetch, pollSec, fetchNow]);
+  // Live MT4: refresh the moment TrendLensFeed writes new prices.
+  useEffect(() => {
+    if (!active || offline || source !== 'mt4' || mt4Refresh >= 0) return;
+    return window.trendlens.onMt4OptionsChanged(() => void fetchRef.current());
+  }, [active, offline, source, mt4Refresh]);
 
   // ---- derived data
   const chain = offline?.chain ?? live;
@@ -570,6 +590,18 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
           </select>
         </label>
         )}
+        {source === 'mt4' ? (
+          <label>
+            Auto-refresh
+            <select value={mt4Refresh} onChange={(e) => setMt4Refresh(Number(e.target.value))}>
+              <option value={-1}>Live (every MT4 update)</option>
+              <option value={1}>1 s</option>
+              <option value={2}>2 s</option>
+              <option value={5}>5 s</option>
+              <option value={0}>Off</option>
+            </select>
+          </label>
+        ) : (
         <label>
           Auto-refresh
           <select value={refreshSec} onChange={(e) => setRefreshSec(Number(e.target.value))}>
@@ -581,6 +613,7 @@ export function OptionsView({ settings, active, notify, onOpenSettings }: { sett
             ))}
           </select>
         </label>
+        )}
         <button className="btn btn-sm" onClick={() => void fetchNow()} disabled={fetching || !canFetch || !!offline} title="Refresh now">
           {fetching ? <span className="spinner" /> : '⟳ Refresh'}
         </button>

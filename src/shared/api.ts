@@ -198,6 +198,8 @@ export interface TrendLensApi {
   optionChain(req: OptionChainRequest): Promise<OptionChainResult>;
   mt4OptionCatalog(): Promise<Mt4OptionCatalog>;
   mt4OptionChain(req: { key: string; expiry: string }): Promise<OptionChainResult>;
+  /** Fires whenever TrendLensFeed writes new option prices; returns an unsubscribe function. */
+  onMt4OptionsChanged(handler: () => void): () => void;
   setOptionCredentials(c: OptionCredentials): Promise<Settings>;
   testOptionProvider(provider: OptionDataProvider): Promise<{ ok: boolean; message: string }>;
   importOptionCsv(): Promise<{ fileName: string; parsed: ParsedOptionCsv } | null>;

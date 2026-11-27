@@ -6,8 +6,8 @@
  * MCX chains always use Dhan, because Upstox does not offer MCX option chains.
  */
 import { app } from 'electron';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { analyzeGreeks } from '@core/options/iv-analysis';
 import { summarizeChain } from '@core/options/option-analytics';
@@ -244,6 +244,54 @@ function readMt4Export() {
   return parseMt4OptionsExport(readFileSync(p, 'utf8'));
 }
 
+/** Reads the export, retrying briefly if it is caught while the EA replaces it. */
+async function readMt4ExportSettled() {
+  for (let i = 0; ; i++) {
+    try {
+      return readMt4Export();
+    } catch (e) {
+      if (i >= 3) throw e;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  }
+}
+
+let watcher: FSWatcher | undefined;
+
+/**
+ * Calls `onChange` as soon as TrendLensFeed rewrites options.json, so the Option Chain can refresh
+ * on every MT4 update instead of polling. Bursts of file events are coalesced (≤ one call per 40 ms).
+ */
+export function watchMt4Options(onChange: () => void): void {
+  const dir = dirname(MT4_OPTIONS_FILE());
+  const start = () => {
+    if (watcher) return;
+    if (!existsSync(dir)) {
+      setTimeout(start, 10_000);
+      return;
+    }
+    try {
+      let pending: ReturnType<typeof setTimeout> | undefined;
+      watcher = watch(dir, { persistent: false }, (_event, name) => {
+        if (name && String(name) !== 'options.json') return;
+        if (pending) return;
+        pending = setTimeout(() => {
+          pending = undefined;
+          onChange();
+        }, 40);
+      });
+      watcher.on('error', () => {
+        watcher?.close();
+        watcher = undefined;
+        setTimeout(start, 5000);
+      });
+    } catch {
+      setTimeout(start, 10_000);
+    }
+  };
+  start();
+}
+
 async function contractFor(exchange: OptionExchange, symbol: string): Promise<OptionUnderlying | undefined> {
   try {
     return (await publicContracts(exchange)).find((u) => u.symbol === symbol);
@@ -285,7 +333,7 @@ export async function mt4Catalog(): Promise<Mt4OptionCatalog> {
 }
 
 export async function mt4ChainFor(key: string, expiry: string): Promise<OptionChainResult> {
-  const exp = readMt4Export();
+  const exp = await readMt4ExportSettled();
   if (!exp) throw new Error(`MetaTrader 4 option prices are not being exported yet. ${MT4_SETUP}`);
   const s = groupMt4Series(exp).find((x) => x.key === key);
   if (!s) throw new Error(`The MT4 option series ${key} is no longer in Market Watch.`);

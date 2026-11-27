@@ -23,6 +23,11 @@ const api: TrendLensApi = {
   optionChain: (req) => ipcRenderer.invoke('options:chain', req),
   mt4OptionCatalog: () => ipcRenderer.invoke('options:mt4Catalog'),
   mt4OptionChain: (req) => ipcRenderer.invoke('options:mt4Chain', req),
+  onMt4OptionsChanged: (handler) => {
+    const fn = () => handler();
+    ipcRenderer.on('options:mt4Changed', fn);
+    return () => ipcRenderer.removeListener('options:mt4Changed', fn);
+  },
   setOptionCredentials: (c) => ipcRenderer.invoke('options:credentials', c),
   testOptionProvider: (provider) => ipcRenderer.invoke('options:test', provider),
   importOptionCsv: () => ipcRenderer.invoke('options:importCsv'),

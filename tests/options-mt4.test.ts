@@ -122,10 +122,13 @@ describe('MT4 option export', () => {
   });
 });
 
-describe('bundled TrendLensFeed 1.10 option export', () => {
+describe('bundled TrendLensFeed 1.11 option export', () => {
   const src = readFileSync(resolve(__dirname, '..', 'resources', 'mt4', 'TrendLensFeed.mq4'), 'utf8');
   it('writes options.json with the fields TrendLens parses', () => {
-    expect(src).toContain('#define FEED_VERSION  "1.10"');
+    expect(src).toContain('#define FEED_VERSION  "1.11"');
+    // Fast path: option prices every 0.5 s, written only when they change.
+    expect(src).toMatch(/input int\s+OptionsMs\s+=\s+500;/);
+    expect(src).toContain('body == g_lastOptBody');
     expect(src).toContain('OUT_DIR + "options.json"');
     for (const k of ['\\"s\\":', '\\"d\\":', '\\"b\\":', '\\"a\\":', '\\"t\\":', '\\"pc\\":', '\\"dg\\":', '\\"options\\":[', '\\"underlyings\\":[', '\\"gmt_time\\":']) expect(src, k).toContain(k);
   });

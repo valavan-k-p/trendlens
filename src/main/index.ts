@@ -213,6 +213,8 @@ app.whenReady().then(() => {
   registerIpc();
   buildMenu();
   createWindow();
+  // Push "new MT4 option prices" to the page the moment the EA writes them.
+  options.watchMt4Options(() => win?.webContents.send('options:mt4Changed'));
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
