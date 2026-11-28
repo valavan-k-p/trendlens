@@ -50,6 +50,32 @@ export function marketSession(exchange: OptionExchange, now: number): SessionSta
   return mins >= open && mins <= close ? 'open' : 'closed';
 }
 
+const SESSION_MIN: Record<OptionExchange, [number, number]> = { NSE: [9 * 60 + 15, 15 * 60 + 30], BSE: [9 * 60 + 15, 15 * 60 + 30], MCX: [9 * 60, 23 * 60 + 55] };
+
+export interface SessionInfo {
+  open: boolean;
+  /** Minutes until today's close while open. */
+  minutesToClose?: number;
+  /** Unix seconds of the next session open (weekdays; holidays not known). */
+  nextOpen: number;
+  /** "09:15–15:30 IST". */
+  hours: string;
+}
+
+/** Regular session state and the next open for an exchange (weekdays only; exchange holidays are not known). */
+export function sessionInfo(exchange: OptionExchange, now: number): SessionInfo {
+  const [o, c] = SESSION_MIN[exchange];
+  const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const local = new Date((now + IST_OFFSET) * 1000);
+  const dayStart = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()) / 1000 - IST_OFFSET;
+  const mins = local.getUTCHours() * 60 + local.getUTCMinutes();
+  const weekday = (d: number) => d !== 0 && d !== 6;
+  const open = weekday(local.getUTCDay()) && mins >= o && mins < c;
+  let next = dayStart + o * 60;
+  for (let i = 0; i < 8 && (next <= now || !weekday(new Date((next + IST_OFFSET) * 1000).getUTCDay())); i++) next += 86400;
+  return { open, minutesToClose: open ? c - mins : undefined, nextOpen: next, hours: `${hm(o)}–${hm(c)} IST` };
+}
+
 export type Freshness = 'fresh' | 'delayed' | 'stale';
 
 /**

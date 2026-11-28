@@ -120,3 +120,42 @@ describe('OpenAI-compatible responses', () => {
     expect(detectProvider('AIzaSyD-ExampleExampleExampleExample12')).toBe('gemini');
   });
 });
+
+import { fallbackChain as chainOf, isImageUnsupported as imageUnsupported, shortError as short } from '@core/ai/providers';
+
+describe('AI fallback', () => {
+  it('tries the main AI first, then ticked fallbacks that can be used, each once', () => {
+    const keys = new Set(['gemini', 'groq', 'openrouter']);
+    const usable = (p: string) => keys.has(p);
+    expect(chainOf('gemini', ['groq', 'openrouter'], usable)).toEqual(['gemini', 'groq', 'openrouter']);
+    expect(chainOf('gemini', ['openai', 'groq', 'gemini', 'groq'], usable)).toEqual(['gemini', 'groq']); // no key for OpenAI; no repeats
+    expect(chainOf('anthropic', ['groq'], usable)).toEqual(['groq']); // main AI has no key: start with the fallback
+    expect(chainOf('gemini', [], () => false)).toEqual([]);
+  });
+
+  it('recognises a text-only model refusing the chart image', () => {
+    expect(imageUnsupported(400, 'Model does not support image input')).toBe(true);
+    expect(imageUnsupported(422, "Invalid content type 'image_url'")).toBe(true);
+    expect(imageUnsupported(400, 'Invalid API key')).toBe(false);
+    expect(imageUnsupported(429, 'image quota exceeded')).toBe(false);
+  });
+
+  it('keeps fallback notes short', () => {
+    expect(short("Error invoking remote method 'ai:signal': Error: Google Gemini rate limit or quota reached (Resource exhausted). Try again shortly.")).toBe(
+      'Google Gemini rate limit or quota reached (Resource exhausted).',
+    );
+    expect(short('x'.repeat(200))).toHaveLength(108);
+  });
+
+  it('knows the free NVIDIA, Z.ai and Cohere endpoints', () => {
+    expect(detectProvider('nvapi-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789')).toBe('nvidia');
+    expect(AI_PROVIDERS.nvidia).toMatchObject({ baseUrl: 'https://integrate.api.nvidia.com/v1', defaultModel: 'nvidia/nemotron-3.5-super-vl-120b-a12b' });
+    expect(AI_PROVIDERS.zai).toMatchObject({ baseUrl: 'https://api.z.ai/api/paas/v4', defaultModel: 'glm-4.6v-flash' });
+    expect(AI_PROVIDERS.cohere.baseUrl).toBe('https://api.cohere.ai/compatibility/v1');
+  });
+
+  it('defaults Groq and OpenRouter to free models that read images', () => {
+    expect(AI_PROVIDERS.groq.defaultModel).toBe('qwen/qwen3.8-27b');
+    expect(AI_PROVIDERS.openrouter.defaultModel).toMatch(/:free$/);
+  });
+});

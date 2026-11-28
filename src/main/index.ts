@@ -8,6 +8,8 @@ import type { OptionExchange } from '@core/options/types';
 import * as market from './market';
 import * as store from './store';
 import { reviewChart, testAi } from './ai';
+import { aiChat, aiSignal } from './ai-trading';
+import { usageSummary } from './ai-usage';
 import * as mt4 from './mt4';
 import { installFeed } from './mt4install';
 import * as options from './options/service';
@@ -86,7 +88,7 @@ function buildMenu(): void {
       submenu: [
         { label: 'Analyzer', accelerator: 'CmdOrCtrl+1', click: () => send('view:analyzer') },
         { label: 'Markets', accelerator: 'CmdOrCtrl+2', click: () => send('view:markets') },
-        { label: 'AI Chart Review', accelerator: 'CmdOrCtrl+3', click: () => send('view:upload') },
+        { label: 'AI Assistant', accelerator: 'CmdOrCtrl+3', click: () => send('view:upload') },
         { label: 'History', accelerator: 'CmdOrCtrl+4', click: () => send('view:history') },
         { label: 'Option Chain', accelerator: 'CmdOrCtrl+5', click: () => send('view:options') },
         { type: 'separator' },
@@ -163,6 +165,9 @@ function registerIpc(): void {
   ipcMain.handle('history:delete', (_e, id: string) => store.deleteHistory(id));
   ipcMain.handle('ai:review', (_e, req) => reviewChart(req));
   ipcMain.handle('ai:test', (_e, req) => testAi(req));
+  ipcMain.handle('ai:signal', (_e, req) => aiSignal(req));
+  ipcMain.handle('ai:chat', (_e, req) => aiChat(req));
+  ipcMain.handle('ai:usage', () => usageSummary());
   const exchangeOk = (x: unknown): x is OptionExchange => x === 'NSE' || x === 'BSE' || x === 'MCX';
   ipcMain.handle('options:catalog', (_e, exchange: OptionExchange, refresh?: boolean) => {
     if (!exchangeOk(exchange)) throw new Error('Unknown exchange.');

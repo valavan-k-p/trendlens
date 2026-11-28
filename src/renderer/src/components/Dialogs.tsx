@@ -24,6 +24,8 @@ export function SettingsDialog({ settings, onClose, onSaved }: { settings: Setti
   const [key, setKey] = useState('');
   const [aiChoice, setAiChoice] = useState<AiProviderSetting>(settings.hasApiKey || settings.savedKeys.length ? settings.aiProvider : 'auto');
   const [aiModels, setAiModels] = useState(settings.aiModels);
+  const [fallback, setFallback] = useState<AiProviderId[]>(settings.aiFallback ?? []);
+  const [fbKeys, setFbKeys] = useState<Partial<Record<AiProviderId, string>>>({});
   const [baseUrl, setBaseUrl] = useState(settings.aiBaseUrl ?? '');
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [testing, setTesting] = useState(false);
@@ -132,6 +134,7 @@ export function SettingsDialog({ settings, onClose, onSaved }: { settings: Setti
         aiProvider,
         aiModels: Object.fromEntries(Object.entries(aiModels).map(([p, m]) => [p, (m ?? '').trim()]).filter(([, m]) => m)),
         aiBaseUrl: baseUrl.trim() || undefined,
+        aiFallback: fallback.filter((p) => p !== aiProvider),
         optionProvider: optProvider,
         optionRiskFreeRate: Number.isFinite(Number(rate)) ? Math.max(0, Math.min(25, Number(rate))) : settings.optionRiskFreeRate,
         optionDividendYield: Number.isFinite(Number(divYield)) ? Math.max(0, Math.min(15, Number(divYield))) : settings.optionDividendYield,
@@ -141,6 +144,7 @@ export function SettingsDialog({ settings, onClose, onSaved }: { settings: Setti
         indiaWatchlist: fromText(india),
       });
       if (key.trim()) s = await window.trendlens.setApiKey(aiProvider, key.trim());
+      for (const [p, k] of Object.entries(fbKeys)) if (k?.trim() && p !== aiProvider) s = await window.trendlens.setApiKey(p as AiProviderId, k.trim());
       s = (await saveOptionCreds()) ?? s;
       onSaved(s);
       onClose();
@@ -329,7 +333,7 @@ export function SettingsDialog({ settings, onClose, onSaved }: { settings: Setti
         </a>
       </div>
 
-      <h3>AI chart review (optional)</h3>
+      <h3>AI: signal and assistant (optional)</h3>
       <div className="field">
         <label>AI provider</label>
         <select className="input" value={aiChoice} onChange={(e) => setAiChoice(e.target.value as AiProviderSetting)}>
@@ -393,6 +397,75 @@ export function SettingsDialog({ settings, onClose, onSaved }: { settings: Setti
             Get a {aiInfo.name} key
           </a>
         )}
+      </div>
+      <div className="field" style={{ alignItems: 'start' }}>
+        <label>
+          Fallback AIs
+          <div style={{ color: 'var(--faint)', fontSize: 11, marginTop: 4 }}>tried in order when the main AI fails</div>
+        </label>
+        <div className="fb-list">
+          {[...fallback.filter((p) => p !== aiProvider), ...AI_PROVIDER_IDS.filter((p) => p !== aiProvider && !fallback.includes(p))].map((p) => {
+            const on = fallback.includes(p) && p !== aiProvider;
+            const info = AI_PROVIDERS[p];
+            const saved = settings.savedKeys.includes(p);
+            const idx = fallback.indexOf(p);
+            const move = (d: number) => {
+              const f = fallback.filter((x) => x !== aiProvider);
+              const i = f.indexOf(p);
+              const j = i + d;
+              if (i < 0 || j < 0 || j >= f.length) return;
+              [f[i], f[j]] = [f[j], f[i]];
+              setFallback(f);
+            };
+            return (
+              <div key={p} className={`fb-row ${on ? 'on' : ''}`}>
+                <label className="fb-name">
+                  <input type="checkbox" checked={on} onChange={(e) => setFallback(e.target.checked ? [...fallback.filter((x) => x !== p), p] : fallback.filter((x) => x !== p))} />
+                  {on ? `${idx + 1}. ` : ''}
+                  {info.name}
+                </label>
+                {p === 'custom' ? (
+                  <span className="fb-hint">uses the base URL above</span>
+                ) : (
+                  <input
+                    className="input"
+                    type="password"
+                    placeholder={saved ? 'key saved ✓' : info.keyHint}
+                    value={fbKeys[p] ?? ''}
+                    onChange={(e) => setFbKeys({ ...fbKeys, [p]: e.target.value })}
+                  />
+                )}
+                <input className="input" placeholder={info.defaultModel || 'model'} value={aiModels[p] ?? ''} onChange={(e) => setAiModels({ ...aiModels, [p]: e.target.value })} />
+                {on && (
+                  <span className="fb-move">
+                    <button className="btn btn-sm" onClick={() => move(-1)} title="Try earlier">
+                      ↑
+                    </button>
+                    <button className="btn btn-sm" onClick={() => move(1)} title="Try later">
+                      ↓
+                    </button>
+                  </span>
+                )}
+                {on && !saved && !fbKeys[p]?.trim() && p !== 'custom' && <span className="fb-warn">needs a key</span>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <div style={{ color: 'var(--faint)', fontSize: 12 }}>
+        If the main AI runs out of quota, is busy, rejects its key or cannot be reached, TrendLens asks the next ticked AI and notes which one answered. Free keys:{' '}
+        <a href="#" onClick={(e) => (e.preventDefault(), void window.trendlens.openExternal('https://console.groq.com/keys'))}>
+          Groq
+        </a>{' '}
+        (about 1,000 requests a day) ·{' '}
+        <a href="#" onClick={(e) => (e.preventDefault(), void window.trendlens.openExternal('https://openrouter.ai/settings/keys'))}>
+          OpenRouter
+        </a>{' '}
+        (":free" models, about 50 requests a day each) ·{' '}
+        <a href="#" onClick={(e) => (e.preventDefault(), void window.trendlens.openExternal('https://aistudio.google.com/apikey'))}>
+          Gemini
+        </a>
+        . Text-only models skip the chart image automatically.
       </div>
       {err && <div className="tone-bear" style={{ marginTop: 10 }}>{err}</div>}
       <div className="modal-actions">

@@ -30,6 +30,8 @@ interface Props {
   theme: Settings['theme'];
   loading: boolean;
   error: string | null;
+  /** Receives a function that screenshots the chart (all panes, indicators, levels, markers). */
+  captureRef?: { current: (() => HTMLCanvasElement | null) | null };
 }
 
 interface Legend {
@@ -57,7 +59,7 @@ function palette(theme: Settings['theme']) {
   };
 }
 
-export function ChartPanel({ series, report, indicators, lowerPane, theme, loading, error }: Props) {
+export function ChartPanel({ series, report, indicators, lowerPane, theme, loading, error, captureRef }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRefs = useRef<ISeriesApi<never>[]>([]);
@@ -70,7 +72,9 @@ export function ChartPanel({ series, report, indicators, lowerPane, theme, loadi
     if (!host.current) return;
     const chart = createChart(host.current, { autoSize: true });
     chartRef.current = chart;
+    if (captureRef) captureRef.current = () => chartRef.current?.takeScreenshot() ?? null;
     return () => {
+      if (captureRef) captureRef.current = null;
       chart.remove();
       chartRef.current = null;
       seriesRefs.current = [];

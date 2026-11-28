@@ -13,8 +13,8 @@ No login: it opens straight to the analyzer.
 
 **Installed app** (after `npm run dist`):
 
-- `release\TrendLens Setup 1.2.0.exe` — installer (Start menu + desktop shortcut), or
-- `release\TrendLens-Portable-1.2.0.exe` — single portable exe, no install.
+- `release\TrendLens Setup 1.3.0.exe` — installer (Start menu + desktop shortcut), or
+- `release\TrendLens-Portable-1.3.0.exe` — single portable exe, no install.
 
 **From source** (Node.js 22.12+):
 
@@ -37,7 +37,8 @@ npm start
 | Chart overlays | Key levels, order-block / FVG zones, structure and sweep/trap markers |
 | Markets | Scrolling global ticker, NASDAQ & Indian live price tables, NIFTY / BANK NIFTY index bias |
 | Option Chain | NSE/BSE/MCX option chains (calls · strike · puts, 10 columns a side), ATM/ITM/OTM, highest OI and OI additions, sorting and filters; 14-figure dashboard (PCR, Max Pain, …); OI analysis with build-up, support/resistance, concentration and strike charts; Greeks and IV (provider or Black-Scholes/Black-76), IV smile, skew, IV rank; Max Pain chart; saved snapshots with comparisons. See `docs/OPTIONS.md` |
-| AI chart review | Upload, paste or drop a chart screenshot for a structured AI review with your own key: Claude, OpenAI, Google Gemini, OpenRouter, Groq or any OpenAI-compatible server (DeepSeek, Ollama, LM Studio) |
+| AI signal | Analyzer → **AI review…** sends the analysis, a chart screenshot and live option prices (MT4 / broker) and gets one compact answer: BUY CE / BUY PE with option, entry, target and stop-loss, or NO ENTRY; after "I took this trade" it answers HOLD (trail SL) or EXIT. JSON-only reply, low thinking, ~1–2k tokens per call |
+| AI Assistant | Chat for market news: with Gemini (Google Search) or Claude (web search) it finds current news and global drivers, marks each item credible/unverified and gives a short direction with sources; attach a chart to ask about it |
 | History | Save reports locally, revisit, export as Markdown |
 | Data | MetaTrader 4 history (primary: Indian indices, MCX, options), Yahoo Finance, Binance, CSV import |
 
@@ -89,6 +90,13 @@ docs/            PLAN.md, ANALYSIS.md (every rule and threshold)
   prices from your MT4 (TrendLensFeed 1.10 exports the option symbols in Market Watch) with
   calculated IV and Greeks; MT4 has no option OI, so PCR and Max Pain need a broker API.
   Details and assumptions: `docs/OPTIONS.md`.
+- **Free news for the AI.** The AI signal (news box) and the AI Assistant (News → Free headlines)
+  read public RSS feeds, with no key: Google News search RSS (personal, non-commercial use per its
+  terms), Economic Times, Livemint and Business Standard market feeds and RBI press releases. Each
+  instrument maps to what moves it (natural gas → US weather, storage, LNG; crude → OPEC,
+  inventories; NIFTY → FII/DII, RBI, global cues). The 15–18 most relevant headlines from the
+  last 36 h are sent (about 500 tokens); market-research and press-release filler is dropped.
+  Works on a free Gemini key; "+ Google Search" adds the provider's web search (paid key).
 - Yahoo Finance public chart/search endpoints: no key; unofficial, intended here for
   personal use; quotes for some exchanges are delayed. Indices and forex report no
   volume, so volume modules are skipped for them.

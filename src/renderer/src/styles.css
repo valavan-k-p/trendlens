@@ -315,3 +315,65 @@ sup.src-c { color: var(--faint); font-weight: 700; }
 .oc-snap-list { max-height: 480px; overflow: auto; }
 .oc-snap-list td { font-size: 12px; padding: 5px 6px; }
 .quotes tr.sel td { background: color-mix(in srgb, var(--accent-2) 14%, transparent); }
+
+/* ---------- AI signal card ---------- */
+.ai-signal { padding: 10px 12px; }
+.ai-signal-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.ai-signal-head label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.ai-open { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12px; padding: 6px 8px; border: 1px dashed var(--accent-2); border-radius: 7px; }
+.ai-err { margin-top: 8px; font-size: 12px; }
+.ai-raw { margin-top: 8px; font-size: 12px; color: var(--muted); user-select: text; }
+.ai-result { margin-top: 10px; border-radius: 9px; padding: 10px 12px; border: 1px solid var(--border); background: var(--panel-2); user-select: text; }
+.ai-result.ai-bull { border-color: var(--bull); background: color-mix(in srgb, var(--bull) 9%, var(--panel-2)); }
+.ai-result.ai-bear { border-color: var(--bear); background: color-mix(in srgb, var(--bear) 9%, var(--panel-2)); }
+.ai-result.ai-warn { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 9%, var(--panel-2)); }
+.ai-title { font-weight: 800; font-size: 15px; letter-spacing: 0.3px; }
+.ai-bull .ai-title { color: var(--bull); }
+.ai-bear .ai-title { color: var(--bear); }
+.ai-warn .ai-title { color: var(--warn); }
+.ai-opt { font: 600 14px var(--mono); margin-top: 4px; }
+.ai-grid { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 8px 0 4px; font-size: 12.5px; }
+.ai-grid span { color: var(--muted); }
+.ai-grid b { font-family: var(--mono); font-weight: 600; }
+.ai-note { font-size: 12px; color: var(--text); margin: 4px 0 6px; }
+.ai-meta { margin-top: 6px; font-size: 10.5px; color: var(--faint); }
+
+/* ---------- AI assistant chat ---------- */
+.chat-page { display: flex; flex-direction: column; gap: 10px; }
+.chat-page.drag-over { outline: 2px dashed var(--accent); outline-offset: -8px; }
+.chat-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.chat-head h2 { margin: 0; }
+.chat-head .sub { margin: 0; color: var(--muted); font-size: 12px; }
+.chat-toggle { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.chat-log { flex: 1 1 0; min-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px; }
+.chat-empty { color: var(--muted); text-align: center; margin: auto; }
+.chat-quick { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.chat-msg { max-width: 860px; border-radius: 12px; padding: 9px 13px; background: var(--panel); border: 1px solid var(--border); user-select: text; line-height: 1.5; }
+.chat-msg.user { align-self: flex-end; background: color-mix(in srgb, var(--accent-2) 14%, var(--panel)); border-color: color-mix(in srgb, var(--accent-2) 40%, var(--border)); }
+.chat-msg.assistant { align-self: flex-start; }
+.chat-msg.error { border-color: var(--bear); color: var(--bear); }
+.chat-msg img { max-width: 360px; max-height: 220px; border-radius: 8px; display: block; margin-bottom: 6px; }
+.chat-msg .md h2, .chat-msg .md h3 { margin-top: 6px; }
+.chat-text { white-space: pre-wrap; }
+.chat-meta { margin-top: 6px; font-size: 10.5px; color: var(--faint); display: flex; flex-direction: column; gap: 4px; }
+.chat-sources { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; }
+.chat-sources a { color: var(--accent-2); text-decoration: none; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-input { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.chat-input textarea { flex: 1; min-width: 300px; resize: none; }
+.chat-attach { width: 100%; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.chat-attach img { height: 40px; border-radius: 5px; }
+
+.ai-news { font-size: 11.5px; color: var(--accent-2); margin: 0 0 6px; }
+.ai-usage { font-size: 11px; color: var(--faint); cursor: help; border-bottom: 1px dotted var(--faint); }
+.chat-toggle select { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; font-size: 12px; color: var(--text); }
+
+/* ---------- AI fallback list (Settings) ---------- */
+.fb-list { display: flex; flex-direction: column; gap: 5px; }
+.fb-row { display: grid; grid-template-columns: 150px 1fr 1fr auto; gap: 6px; align-items: center; opacity: 0.6; }
+.fb-row.on { opacity: 1; }
+.fb-row .input { padding: 4px 8px; font-size: 12px; }
+.fb-name { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--text) !important; white-space: nowrap; }
+.fb-hint { font-size: 11px; color: var(--faint); }
+.fb-move { display: flex; gap: 3px; }
+.fb-move .btn { padding: 1px 7px; }
+.fb-warn { grid-column: 2 / -1; font-size: 11px; color: var(--warn); }

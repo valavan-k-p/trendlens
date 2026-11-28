@@ -4,7 +4,7 @@
  * used by every provider except Anthropic (which goes through its own SDK).
  */
 
-export type AiProviderId = 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'groq' | 'custom';
+export type AiProviderId = 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'groq' | 'nvidia' | 'zai' | 'cohere' | 'custom';
 /** 'auto' picks the provider from the key's prefix when the key is saved. */
 export type AiProviderSetting = AiProviderId | 'auto';
 
@@ -61,7 +61,8 @@ export const AI_PROVIDERS: Record<AiProviderId, AiProviderInfo> = {
     name: 'OpenRouter',
     label: 'OpenRouter (many models, one key)',
     baseUrl: 'https://openrouter.ai/api/v1',
-    defaultModel: 'openrouter/auto',
+    // A free model (OpenRouter's ':free' variants cost nothing; openrouter/auto routes to paid models).
+    defaultModel: 'google/gemma-4-31b-it:free',
     keyHint: 'sk-or-…',
     keysUrl: 'https://openrouter.ai/keys',
   },
@@ -70,9 +71,42 @@ export const AI_PROVIDERS: Record<AiProviderId, AiProviderInfo> = {
     name: 'Groq',
     label: 'Groq',
     baseUrl: 'https://api.groq.com/openai/v1',
-    defaultModel: 'meta-llama/llama-4-scout-17b-16e-instruct',
+    // On Groq's free plan and reads images (chart screenshots).
+    defaultModel: 'qwen/qwen3.8-27b',
     keyHint: 'gsk_…',
     keysUrl: 'https://console.groq.com/keys',
+  },
+  nvidia: {
+    id: 'nvidia',
+    name: 'NVIDIA NIM',
+    label: 'NVIDIA NIM (free endpoints)',
+    baseUrl: 'https://integrate.api.nvidia.com/v1',
+    // Free endpoint, reads images.
+    defaultModel: 'nvidia/nemotron-3.5-super-vl-120b-a12b',
+    keyHint: 'nvapi-…',
+    keysUrl: 'https://build.nvidia.com',
+    note: 'Free with an NVIDIA Developer Program account; rate-limited per model.',
+  },
+  zai: {
+    id: 'zai',
+    name: 'Z.ai',
+    label: 'Z.ai GLM (free Flash models)',
+    baseUrl: 'https://api.z.ai/api/paas/v4',
+    // Listed as free on Z.ai's pricing page, under vision models.
+    defaultModel: 'glm-4.6v-flash',
+    keyHint: 'Z.ai API key',
+    keysUrl: 'https://z.ai/manage-apikey/apikey-list',
+    note: 'GLM-4.6V-Flash, GLM-4.5-Flash and GLM-4.7-Flash are free.',
+  },
+  cohere: {
+    id: 'cohere',
+    name: 'Cohere',
+    label: 'Cohere (trial key)',
+    baseUrl: 'https://api.cohere.ai/compatibility/v1',
+    defaultModel: 'command-a-plus-05-2026',
+    keyHint: 'Cohere API key',
+    keysUrl: 'https://dashboard.cohere.com/api-keys',
+    note: 'Trial keys: 1,000 calls a month, 20 a minute. Text only: the chart image is skipped.',
   },
   custom: {
     id: 'custom',
@@ -94,6 +128,7 @@ export function detectProvider(key: string): AiProviderId | undefined {
   if (/^sk-or-/i.test(k)) return 'openrouter';
   if (/^AIza[0-9A-Za-z_-]{20,}$/.test(k)) return 'gemini';
   if (/^gsk_/i.test(k)) return 'groq';
+  if (/^nvapi-/i.test(k)) return 'nvidia';
   if (/^sk-(proj-|svcacct-|admin-)?[A-Za-z0-9_-]{20,}$/.test(k)) return 'openai';
   return undefined;
 }
@@ -201,6 +236,28 @@ export function modelsToTry(info: AiProviderInfo, model: string): string[] {
   const fb = info.fallbackModels ?? [];
   if (model !== info.defaultModel && !fb.includes(model)) return [model];
   return [model, ...fb.filter((m) => m !== model)];
+}
+
+/**
+ * The order AI providers are tried in: the main one first, then the chosen fallbacks, each once,
+ * keeping only those that can be used (a saved key, or a base URL for the custom server).
+ */
+export function fallbackChain(primary: AiProviderId, fallbacks: readonly AiProviderId[], usable: (p: AiProviderId) => boolean): AiProviderId[] {
+  const out: AiProviderId[] = [];
+  for (const p of [primary, ...fallbacks]) if (AI_PROVIDERS[p] && !out.includes(p) && usable(p)) out.push(p);
+  return out;
+}
+
+/** A provider refusing an image because the model is text-only. */
+export function isImageUnsupported(status: number, message: string): boolean {
+  return (status === 400 || status === 404 || status === 415 || status === 422) && /image|vision|multimodal|image_url|modalit/i.test(message);
+}
+
+/** First sentence of an error, short enough for a one-line note. */
+export function shortError(message: string): string {
+  const m = message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '').trim();
+  const first = m.split(/(?<=[.!?])\s/)[0];
+  return first.length > 110 ? `${first.slice(0, 107)}…` : first;
 }
 
 /** Wait before retry n (0-based): 2 s, then 5 s. */

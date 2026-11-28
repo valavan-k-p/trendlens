@@ -87,7 +87,7 @@ export async function reviewChart(req: ChartReviewRequest): Promise<ChartReviewR
 }
 
 /** An HTTP failure from a provider, keeping the status so busy/rate-limit errors can be retried. */
-class HttpError extends Error {
+export class HttpError extends Error {
   constructor(
     message: string,
     readonly status: number,
@@ -134,7 +134,7 @@ async function reviewWithClaude(apiKey: string, model: string, req: ChartReviewR
   }
 }
 
-function claudeError(error: unknown): Error {
+export function claudeError(error: unknown): Error {
   if (error instanceof Anthropic.AuthenticationError) return new Error('The Anthropic API key was rejected. Check it in Settings.');
   if (error instanceof Anthropic.PermissionDeniedError) return new Error('This API key cannot use the selected model.');
   if (error instanceof Anthropic.NotFoundError) return new Error('Anthropic could not find that model. Check the model name in Settings.');
@@ -145,7 +145,7 @@ function claudeError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-function baseUrlFor(provider: AiProviderId, custom?: string): string {
+export function baseUrlFor(provider: AiProviderId, custom?: string): string {
   if (provider === 'custom') {
     if (!custom?.trim()) throw new Error('Enter the server base URL for the OpenAI-compatible provider in Settings.');
     return normalizeBaseUrl(custom);
@@ -153,14 +153,14 @@ function baseUrlFor(provider: AiProviderId, custom?: string): string {
   return AI_PROVIDERS[provider].baseUrl!;
 }
 
-function headers(apiKey: string | undefined): Record<string, string> {
+export function headers(apiKey: string | undefined): Record<string, string> {
   const h: Record<string, string> = { 'Content-Type': 'application/json', 'X-Title': 'TrendLens' };
   if (apiKey) h.Authorization = `Bearer ${apiKey}`;
   return h;
 }
 
 /** fetch with a timeout; turns HTTP and network failures into plain-language errors. */
-async function request(url: string, init: RequestInit, label: string): Promise<unknown> {
+export async function request(url: string, init: RequestInit, label: string): Promise<unknown> {
   let res: Response;
   try {
     res = await fetch(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });

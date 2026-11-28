@@ -1,5 +1,7 @@
 /** IPC contract between the renderer and the Electron main process. */
 import type { AiProviderId } from '@core/ai/providers';
+import type { ChatTurn, TradeSignal } from '@core/ai/trading';
+import type { CallUsage, UsageSummary } from '@core/ai/usage';
 import type { OptionSnapshot } from '@core/options/option-snapshots';
 import type { ParsedOptionCsv } from '@core/options/providers/csv';
 import type { OptionChain, OptionExchange, OptionUnderlying } from '@core/options/types';
@@ -42,6 +44,8 @@ export interface Settings {
   aiModels: Partial<Record<AiProviderId, string>>;
   /** Base URL for the 'custom' OpenAI-compatible provider. */
   aiBaseUrl?: string;
+  /** Providers tried in this order when the main one fails (quota, busy, key rejected, unreachable). */
+  aiFallback: AiProviderId[];
   /** 'mt4': MetaTrader 4 history is the primary chart source; online providers fill gaps. */
   dataSource: 'mt4' | 'online';
   /** Optional extra MT4 data folder (the one containing "history"). */
@@ -163,6 +167,55 @@ export interface ChartReviewResult {
   note?: string;
 }
 
+export interface AiSignalRequest {
+  /** Compact market context built by signalContext(). */
+  context: string;
+  /** Optional chart screenshot (JPEG/PNG base64). */
+  imageBase64?: string;
+  mediaType?: 'image/png' | 'image/jpeg';
+  /** Add free RSS headlines for the instrument so the AI weighs current news. */
+  news?: boolean;
+  /** Instrument on screen, for picking the news topic. */
+  symbol?: string;
+}
+
+/** One call's usage and its estimated cost at paid-tier prices (undefined when the price is unknown). */
+export type AiCallUsage = CallUsage & { cost?: number };
+
+export interface AiSignalResult {
+  /** Undefined when the reply could not be read as a signal (see raw). */
+  signal?: TradeSignal;
+  raw: string;
+  model: string;
+  provider: string;
+  tokens?: number;
+  usage?: AiCallUsage;
+  note?: string;
+  /** Free headlines sent with the request. */
+  headlines?: number;
+}
+
+export type NewsMode = 'rss' | 'search' | 'off';
+
+export interface AiChatRequest {
+  turns: ChatTurn[];
+  /** 'rss' = free headlines (any provider, free tier OK); 'search' = also the provider's web search (paid Gemini key or Claude); 'off'. */
+  newsMode: NewsMode;
+  /** Instrument on screen, used when the question names none. */
+  symbol?: string;
+}
+
+export interface AiChatResult {
+  text: string;
+  sources: { title: string; url: string }[];
+  model: string;
+  provider: string;
+  searched: boolean;
+  tokens?: number;
+  usage?: AiCallUsage;
+  note?: string;
+}
+
 export interface AiTestRequest {
   provider: AiProviderId;
   /** A key typed but not saved yet; falls back to the stored key. */
@@ -194,6 +247,9 @@ export interface TrendLensApi {
   saveHistory(entry: HistoryEntry): Promise<HistoryEntry[]>;
   deleteHistory(id: string): Promise<HistoryEntry[]>;
   reviewChart(req: ChartReviewRequest): Promise<ChartReviewResult>;
+  aiSignal(req: AiSignalRequest): Promise<AiSignalResult>;
+  aiChat(req: AiChatRequest): Promise<AiChatResult>;
+  aiUsage(): Promise<UsageSummary>;
   optionCatalog(exchange: OptionExchange, refresh?: boolean): Promise<OptionCatalog>;
   optionChain(req: OptionChainRequest): Promise<OptionChainResult>;
   mt4OptionCatalog(): Promise<Mt4OptionCatalog>;

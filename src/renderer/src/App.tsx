@@ -5,6 +5,7 @@ import { looksLikeBinancePair } from '@core/data';
 import { formatPct, formatPrice } from '@core/format';
 import { TIMEFRAMES, type Quote, type Series, type SymbolInfo, type Timeframe } from '@core/types';
 import type { HistoryEntry, Settings, WatchItem } from '../../shared/api';
+import { AiSignalCard } from './components/AiSignalCard';
 import { ChartPanel } from './components/ChartPanel';
 import { HelpDialog, SettingsDialog } from './components/Dialogs';
 import { ReportView } from './components/ReportView';
@@ -52,6 +53,7 @@ export function App() {
   const [mt4Symbols, setMt4Symbols] = useState<SymbolInfo[]>([]);
   const [now, setNow] = useState(Date.now());
   const searchRef = useRef<SymbolSearchHandle>(null);
+  const captureRef = useRef<(() => HTMLCanvasElement | null) | null>(null);
   const loadSeq = useRef(0);
 
   const notify = useCallback((msg: string, isError = false) => {
@@ -306,7 +308,7 @@ export function App() {
               ['analyzer', 'Analyzer'],
               ['markets', 'Markets'],
               ['options', 'Option Chain'],
-              ['upload', 'AI Chart Review'],
+              ['upload', 'AI Assistant'],
               ['history', 'History'],
             ] as [View, string][]
           ).map(([id, label]) => (
@@ -412,7 +414,7 @@ export function App() {
                   <option value="none">None</option>
                 </select>
               </div>
-              <ChartPanel series={series} report={report} indicators={ind} lowerPane={settings.lowerPane} theme={settings.theme} loading={loading} error={error} />
+              <ChartPanel series={series} report={report} indicators={ind} lowerPane={settings.lowerPane} theme={settings.theme} loading={loading} error={error} captureRef={captureRef} />
             </section>
 
             <aside className="side-col">
@@ -440,9 +442,9 @@ export function App() {
                     <button className="btn btn-sm" onClick={() => void exportReport()}>
                       Export
                     </button>
-                    <button className="btn btn-sm" onClick={() => setView('upload')}>
-                      AI review…
-                    </button>
+                  </div>
+                  <div style={{ padding: '10px 14px 0' }}>
+                    <AiSignalCard report={report} candles={series?.candles ?? []} settings={settings} capture={captureRef} onOpenSettings={() => setDialog('settings')} />
                   </div>
                   <ReportView report={report} />
                 </>

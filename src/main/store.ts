@@ -73,6 +73,7 @@ export const DEFAULT_SETTINGS: Omit<Settings, 'hasApiKey' | 'savedKeys' | 'optio
   lowerPane: 'rsi',
   aiProvider: 'anthropic',
   aiModels: {},
+  aiFallback: [],
   optionProvider: 'upstox',
   optionRiskFreeRate: 6.5,
   optionDividendYield: 0,
